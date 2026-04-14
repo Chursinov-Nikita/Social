@@ -11,6 +11,10 @@ export default function NotificationsPage() {
   const supabase = createClient();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [actionableRequestIds, setActionableRequestIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   const loadNotifications = useCallback(async () => {
     if (!user) return;
@@ -21,7 +25,43 @@ export default function NotificationsPage() {
       .order("created_at", { ascending: false })
       .limit(50)) as { data: Notification[] | null; error: unknown };
 
-    if (data) setNotifications(data);
+    if (data) {
+      setNotifications(data);
+
+      const requestSenderIds = [
+        ...new Set(
+          data
+            .filter((n) => n.type === "friend_request")
+            .map((n) => n.sender_id),
+        ),
+      ];
+
+      if (requestSenderIds.length > 0) {
+        const { data: pendingRequests } = await supabase
+          .from("friendships")
+          .select("sender_id")
+          .eq("receiver_id", user.id)
+          .eq("status", "pending")
+          .in("sender_id", requestSenderIds);
+
+        const pendingSenders = new Set(
+          (pendingRequests ?? []).map((item: { sender_id: string }) => item.sender_id),
+        );
+
+        setActionableRequestIds(
+          new Set(
+            data
+              .filter(
+                (n) =>
+                  n.type === "friend_request" && pendingSenders.has(n.sender_id),
+              )
+              .map((n) => n.id),
+          ),
+        );
+      } else {
+        setActionableRequestIds(new Set());
+      }
+    }
     setLoading(false);
   }, [user, supabase]);
 
@@ -63,6 +103,49 @@ export default function NotificationsPage() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
     );
+  };
+
+  const handleRequestAction = async (
+    notification: Notification,
+    action: "accept" | "decline",
+  ) => {
+    if (!user || actionLoadingId === notification.id) return;
+
+    setActionLoadingId(notification.id);
+
+    try {
+      if (action === "accept") {
+        await supabase
+          .from("friendships")
+          .update({ status: "accepted" })
+          .eq("sender_id", notification.sender_id)
+          .eq("receiver_id", user.id)
+          .eq("status", "pending");
+      } else {
+        await supabase
+          .from("friendships")
+          .delete()
+          .eq("sender_id", notification.sender_id)
+          .eq("receiver_id", user.id)
+          .eq("status", "pending");
+      }
+
+      await supabase
+        .from("notifications")
+        .update({ read: true })
+        .eq("id", notification.id);
+
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)),
+      );
+      setActionableRequestIds((prev) => {
+        const next = new Set(prev);
+        next.delete(notification.id);
+        return next;
+      });
+    } finally {
+      setActionLoadingId(null);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -138,6 +221,31 @@ export default function NotificationsPage() {
                   <p className="text-xs text-white/30 mt-0.5">
                     {formatDate(n.created_at)}
                   </p>
+                  {n.type === "friend_request" &&
+                    actionableRequestIds.has(n.id) && (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleRequestAction(n, "accept");
+                          }}
+                          disabled={actionLoadingId === n.id}
+                          className="text-xs text-white font-medium px-3 py-1.5 rounded-lg bg-[#3a3a3c] hover:bg-[#48484a] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleRequestAction(n, "decline");
+                          }}
+                          disabled={actionLoadingId === n.id}
+                          className="text-xs text-white/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    )}
                 </div>
               </div>
             ))}

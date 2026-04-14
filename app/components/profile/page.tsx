@@ -11,6 +11,12 @@ import { UserPost } from "@/app/types/profile";
 const Profile = () => {
   const { user, loading } = useAuth();
   const [userPosts, setUserPosts] = useState<UserPost[]>([]);
+  const [currentNickname, setCurrentNickname] = useState("");
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+  const [nicknameMessage, setNicknameMessage] = useState<string | null>(null);
+  const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [isNicknameModalOpen, setIsNicknameModalOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<"overview" | "posts">(
     "overview",
   );
@@ -25,15 +31,61 @@ const Profile = () => {
     if (!user) return;
 
     const supabase = createClient();
-    supabase
-      .from("posts")
-      .select("id, content, image_url, likes_count, comments_count, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .then(({ data }: { data: UserPost[] | null }) => {
-        if (data) setUserPosts(data);
-      });
+    const loadProfilePosts = async () => {
+      const { data } = (await supabase
+        .from("posts")
+        .select(
+          "id, content, image_url, likes_count, comments_count, created_at",
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })) as {
+        data: UserPost[] | null;
+      };
+
+      if (!data || data.length === 0) {
+        setUserPosts([]);
+        return;
+      }
+
+      const postIds = data.map((post) => post.id);
+      const { data: commentsData } = (await supabase
+        .from("comments")
+        .select("post_id")
+        .in("post_id", postIds)) as {
+        data: Array<{ post_id: string }> | null;
+      };
+
+      const commentsByPost = (commentsData ?? []).reduce<
+        Record<string, number>
+      >((acc, comment) => {
+        acc[comment.post_id] = (acc[comment.post_id] ?? 0) + 1;
+        return acc;
+      }, {});
+
+      const postsWithActualComments = data.map((post) => ({
+        ...post,
+        comments_count: commentsByPost[post.id] ?? 0,
+      }));
+
+      setUserPosts(postsWithActualComments);
+    };
+
+    void loadProfilePosts();
   }, [user, loading, router]);
+
+  useEffect(() => {
+    if (!user) return;
+    const nickname =
+      (user.user_metadata?.name as string | undefined)?.trim() ||
+      user.email?.split("@")[0] ||
+      "";
+    const timer = window.setTimeout(() => {
+      setCurrentNickname(nickname);
+      setNicknameDraft(nickname);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [user]);
 
   if (loading) {
     return (
@@ -54,8 +106,8 @@ const Profile = () => {
     0,
   );
   const postsCount = userPosts.length;
-  const initials = user.user_metadata?.name
-    ? user.user_metadata.name.charAt(0).toUpperCase()
+  const initials = currentNickname
+    ? currentNickname.charAt(0).toUpperCase()
     : user.email?.[0].toUpperCase();
   const topPost = [...userPosts].sort(
     (a, b) => (b.likes_count ?? 0) - (a.likes_count ?? 0),
@@ -98,6 +150,57 @@ const Profile = () => {
     }
   };
 
+  const handleSaveNickname = async () => {
+    const nextNickname = nicknameDraft.trim();
+    if (nextNickname.length < 2) {
+      setNicknameError("Nickname must be at least 2 characters.");
+      setNicknameMessage(null);
+      return;
+    }
+    if (nextNickname.length > 30) {
+      setNicknameError("Nickname must be 30 characters or less.");
+      setNicknameMessage(null);
+      return;
+    }
+    if (nextNickname === currentNickname) {
+      setNicknameMessage("Nickname is already up to date.");
+      setNicknameError(null);
+      return;
+    }
+
+    setNicknameSaving(true);
+    setNicknameError(null);
+    setNicknameMessage(null);
+    const supabase = createClient();
+
+    const { error: authError } = await supabase.auth.updateUser({
+      data: { ...user.user_metadata, name: nextNickname },
+    });
+
+    if (authError) {
+      setNicknameError(authError.message);
+      setNicknameSaving(false);
+      return;
+    }
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ username: nextNickname })
+      .eq("id", user.id);
+
+    if (profileError) {
+      setNicknameError(profileError.message);
+      setNicknameSaving(false);
+      return;
+    }
+
+    setCurrentNickname(nextNickname);
+    setNicknameDraft(nextNickname);
+    setNicknameMessage("Nickname updated.");
+    setIsNicknameModalOpen(false);
+    setNicknameSaving(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#1c1c1e] text-white antialiased">
       <div className="mx-auto flex w-full max-w-2xl justify-center px-4 py-10">
@@ -110,12 +213,26 @@ const Profile = () => {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-white">
-                  {user.user_metadata?.name ?? "No name"}
+                  {currentNickname || "No name"}
                 </p>
                 <p className="truncate text-xs text-white/30">{user.email}</p>
                 <p className="mt-2 inline-block rounded-md border border-white/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/30">
                   {achievement}
                 </p>
+              </div>
+              <div className="">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNicknameDraft(currentNickname);
+                    setNicknameError(null);
+                    setNicknameMessage(null);
+                    setIsNicknameModalOpen(true);
+                  }}
+                  className="rounded-lg border border-white/10 bg-[#3a3a3c] px-5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/80 transition hover:bg-[#48484a]"
+                >
+                  Change nickname
+                </button>
               </div>
             </div>
 
@@ -281,10 +398,67 @@ const Profile = () => {
             )}
 
             <div className="mb-2 mt-6 h-px bg-white/5" />
+
             <LogOut />
           </div>
         </div>
       </div>
+      {isNicknameModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => {
+            if (!nicknameSaving) setIsNicknameModalOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2c2c2e] p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-sm font-semibold text-white">
+              Change nickname
+            </p>
+            <p className="mb-4 text-xs text-white/40">
+              Enter a new nickname (2-30 characters).
+            </p>
+            <input
+              type="text"
+              value={nicknameDraft}
+              onChange={(e) => {
+                setNicknameDraft(e.target.value);
+                if (nicknameError) setNicknameError(null);
+                if (nicknameMessage) setNicknameMessage(null);
+              }}
+              maxLength={30}
+              placeholder="Enter your nickname"
+              className="w-full rounded-xl border border-white/10 bg-[#1c1c1e] px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none transition focus:border-white/30"
+            />
+            {nicknameError && (
+              <p className="mt-2 text-xs text-red-300">{nicknameError}</p>
+            )}
+            {!nicknameError && nicknameMessage && (
+              <p className="mt-2 text-xs text-emerald-300">{nicknameMessage}</p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={nicknameSaving}
+                onClick={() => setIsNicknameModalOpen(false)}
+                className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white/60 transition hover:bg-[#3a3a3c] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveNickname}
+                disabled={nicknameSaving}
+                className="rounded-xl border border-white/10 bg-[#3a3a3c] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-white/80 transition hover:bg-[#48484a] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {nicknameSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

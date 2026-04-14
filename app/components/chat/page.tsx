@@ -20,7 +20,7 @@ const ChatPage = () => {
           {/* Окно чата */}
           <div className="flex-1 bg-[#1c1c1e]">
             {selectedUser ? (
-              <ChatWindow recipient={selectedUser} />
+              <ChatWindow key={selectedUser.id} recipient={selectedUser} />
             ) : (
               <div className="h-full flex items-center justify-center text-white/20 text-sm">
                 Select a user to start chatting

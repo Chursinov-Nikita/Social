@@ -1,23 +1,47 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/app/lib/supabase/client";
 import { useAuth } from "@/app/context/auth";
 import type { Friendship } from "@/app/types/friends";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 type Tab = "friends" | "requests" | "search";
+type SearchUser = {
+  id: string;
+  username: string;
+  relationStatus: "none" | "pending" | "accepted";
+};
+type FriendToRemove = { id: string; username?: string };
 
 export default function FriendsPage() {
   const { user } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [tab, setTab] = useState<Tab>("friends");
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [requests, setRequests] = useState<Friendship[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<
-    { id: string; username: string }[]
-  >([]);
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [loading, setLoading] = useState(false);
+  const [friendToRemove, setFriendToRemove] = useState<FriendToRemove | null>(null);
+  const [removingFriend, setRemovingFriend] = useState(false);
+  const friendsCacheKey = user ? `friends-cache:${user.id}` : null;
+  const requestsCacheKey = user ? `friend-requests-cache:${user.id}` : null;
+
+  const persistFriends = useCallback(
+    (value: Friendship[]) => {
+      if (!friendsCacheKey) return;
+      localStorage.setItem(friendsCacheKey, JSON.stringify(value));
+    },
+    [friendsCacheKey],
+  );
+
+  const persistRequests = useCallback(
+    (value: Friendship[]) => {
+      if (!requestsCacheKey) return;
+      localStorage.setItem(requestsCacheKey, JSON.stringify(value));
+    },
+    [requestsCacheKey],
+  );
 
   const loadFriends = useCallback(async () => {
     if (!user) return;
@@ -28,8 +52,11 @@ export default function FriendsPage() {
       .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)) as {
       data: Friendship[] | null;
     };
-    if (data) setFriends(data);
-  }, [user, supabase]);
+    if (data) {
+      setFriends(data);
+      persistFriends(data);
+    }
+  }, [user, supabase, persistFriends]);
 
   const loadRequests = useCallback(async () => {
     if (!user) return;
@@ -38,14 +65,55 @@ export default function FriendsPage() {
       .select("*, profiles:sender_id (id, username, avatar_url)")
       .eq("receiver_id", user.id)
       .eq("status", "pending")) as { data: Friendship[] | null };
-    if (data) setRequests(data);
-  }, [user, supabase]);
+    if (data) {
+      setRequests(data);
+      persistRequests(data);
+    }
+  }, [user, supabase, persistRequests]);
+
+  useEffect(() => {
+    if (!friendsCacheKey || !requestsCacheKey) return;
+
+    const cachedFriends = localStorage.getItem(friendsCacheKey);
+    const cachedFriendsParsed = cachedFriends
+      ? (() => {
+          try {
+            return JSON.parse(cachedFriends) as Friendship[];
+          } catch {
+            localStorage.removeItem(friendsCacheKey);
+            return null;
+          }
+        })()
+      : null;
+
+    const cachedRequests = localStorage.getItem(requestsCacheKey);
+    const cachedRequestsParsed = cachedRequests
+      ? (() => {
+          try {
+            return JSON.parse(cachedRequests) as Friendship[];
+          } catch {
+            localStorage.removeItem(requestsCacheKey);
+            return null;
+          }
+        })()
+      : null;
+
+    const hydrationTimer = window.setTimeout(() => {
+      if (cachedFriendsParsed) setFriends(cachedFriendsParsed);
+      if (cachedRequestsParsed) setRequests(cachedRequestsParsed);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(hydrationTimer);
+    };
+  }, [friendsCacheKey, requestsCacheKey]);
 
   useEffect(() => {
     if (!user) return;
-
-    loadFriends();
-    loadRequests();
+    const initialSyncTimer = window.setTimeout(() => {
+      void loadFriends();
+      void loadRequests();
+    }, 0);
 
     const channel = supabase
       .channel("friendships-channel")
@@ -78,6 +146,7 @@ export default function FriendsPage() {
       .subscribe(() => {});
 
     return () => {
+      window.clearTimeout(initialSyncTimer);
       supabase.removeChannel(channel);
     };
   }, [user, loadFriends, loadRequests, supabase]);
@@ -91,7 +160,44 @@ export default function FriendsPage() {
       .ilike("username", `%${searchQuery}%`)
       .neq("id", user?.id ?? "")
       .limit(10);
-    if (data) setSearchResults(data);
+
+    if (data && user) {
+      const ids = data.map((u: { id: string }) => u.id);
+      let relationMap = new Map<string, SearchUser["relationStatus"]>();
+
+      if (ids.length > 0) {
+        const { data: relations } = await supabase
+          .from("friendships")
+          .select("sender_id, receiver_id, status")
+          .or(
+            `and(sender_id.eq.${user.id},receiver_id.in.(${ids.join(",")})),and(sender_id.in.(${ids.join(",")}),receiver_id.eq.${user.id})`,
+          );
+
+        relationMap = new Map(
+          (relations ?? []).map(
+            (r: { sender_id: string; receiver_id: string; status: string }) => {
+            const counterpart =
+              r.sender_id === user.id ? r.receiver_id : r.sender_id;
+            const status =
+              r.status === "accepted"
+                ? "accepted"
+                : r.status === "pending"
+                  ? "pending"
+                  : "none";
+            return [counterpart, status];
+            },
+          ),
+        );
+      }
+
+      const enriched: SearchUser[] = data.map((u: { id: string; username: string }) => ({
+        ...u,
+        relationStatus: relationMap.get(u.id) ?? "none",
+      }));
+
+      setSearchResults(enriched);
+    }
+
     setLoading(false);
   };
 
@@ -107,9 +213,17 @@ export default function FriendsPage() {
 
     if (existing) {
       if (existing.status === "pending") {
-        alert("Request already sent");
+        setSearchResults((prev) =>
+          prev.map((u) =>
+            u.id === receiverId ? { ...u, relationStatus: "pending" } : u,
+          ),
+        );
       } else if (existing.status === "accepted") {
-        alert("Already friends");
+        setSearchResults((prev) =>
+          prev.map((u) =>
+            u.id === receiverId ? { ...u, relationStatus: "accepted" } : u,
+          ),
+        );
       }
       return;
     }
@@ -121,27 +235,57 @@ export default function FriendsPage() {
     });
 
     if (!error) {
-      setSearchResults((prev) => prev.filter((u) => u.id !== receiverId));
+      setSearchResults((prev) =>
+        prev.map((u) =>
+          u.id === receiverId ? { ...u, relationStatus: "pending" } : u,
+        ),
+      );
     }
   };
 
   const acceptRequest = async (friendshipId: string) => {
-    await supabase
+    const { error } = await supabase
       .from("friendships")
       .update({ status: "accepted" })
       .eq("id", friendshipId);
-    loadRequests();
-    loadFriends();
+    if (error) return;
+
+    const nextRequests = requests.filter((r) => r.id !== friendshipId);
+    const accepted = requests.find((r) => r.id === friendshipId);
+    const nextFriends = accepted
+      ? [...friends, { ...accepted, status: "accepted" as Friendship["status"] }]
+      : friends;
+
+    setRequests(nextRequests);
+    setFriends(nextFriends);
+    persistRequests(nextRequests);
+    persistFriends(nextFriends);
   };
 
   const rejectRequest = async (friendshipId: string) => {
-    await supabase.from("friendships").delete().eq("id", friendshipId);
-    loadRequests();
+    const { error } = await supabase.from("friendships").delete().eq("id", friendshipId);
+    if (error) return;
+
+    const nextRequests = requests.filter((r) => r.id !== friendshipId);
+    setRequests(nextRequests);
+    persistRequests(nextRequests);
   };
 
-  const removeFriend = async (friendshipId: string) => {
-    await supabase.from("friendships").delete().eq("id", friendshipId);
-    loadFriends();
+  const removeFriend = async () => {
+    if (!friendToRemove || removingFriend) return;
+
+    setRemovingFriend(true);
+    const { error } = await supabase
+      .from("friendships")
+      .delete()
+      .eq("id", friendToRemove.id);
+    setRemovingFriend(false);
+    if (error) return;
+
+    const nextFriends = friends.filter((f) => f.id !== friendToRemove.id);
+    setFriends(nextFriends);
+    persistFriends(nextFriends);
+    setFriendToRemove(null);
   };
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
@@ -204,7 +348,9 @@ export default function FriendsPage() {
                       <p className="text-xs text-white/30">Friend</p>
                     </div>
                     <button
-                      onClick={() => removeFriend(f.id)}
+                      onClick={() =>
+                        setFriendToRemove({ id: f.id, username: profile?.username })
+                      }
                       className="text-xs text-white/30 hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-500/10"
                     >
                       Remove
@@ -297,9 +443,14 @@ export default function FriendsPage() {
                   </div>
                   <button
                     onClick={() => sendRequest(u.id)}
-                    className="text-xs text-white font-medium px-3 py-1.5 rounded-lg bg-[#3a3a3c] hover:bg-[#48484a] transition-colors"
+                    disabled={u.relationStatus !== "none"}
+                    className="text-xs text-white font-medium px-3 py-1.5 rounded-lg bg-[#3a3a3c] hover:bg-[#48484a] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Add Friend
+                    {u.relationStatus === "pending"
+                      ? "Request sent"
+                      : u.relationStatus === "accepted"
+                        ? "Already friends"
+                        : "Add Friend"}
                   </button>
                 </div>
               ))}
@@ -307,6 +458,34 @@ export default function FriendsPage() {
           </div>
         )}
       </div>
+      {friendToRemove && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2c2c2e] p-5 shadow-2xl">
+            <h2 className="text-base font-semibold text-white">Remove friend?</h2>
+            <p className="mt-2 text-sm text-white/70">
+              {friendToRemove.username
+                ? `Are you sure you want to remove ${friendToRemove.username} from your friends list?`
+                : "Are you sure you want to remove this user from your friends list?"}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setFriendToRemove(null)}
+                disabled={removingFriend}
+                className="px-3 py-1.5 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => removeFriend()}
+                disabled={removingFriend}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors disabled:opacity-60"
+              >
+                {removingFriend ? "Removing..." : "Remove"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

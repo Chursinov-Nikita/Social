@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Image from "next/image";
 import {
   HeartIcon,
@@ -7,41 +7,101 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { createClient } from "@/app/lib/supabase/client";
-import type { Comment, PostProps, Post } from "@/app/types/feed";
+import type { Comment, PostProps } from "@/app/types/feed";
+
+const commentsCache = new Map<string, Comment[]>();
 
 const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [liked, setLiked] = useState<boolean>(initialLiked);
   const [likesCount, setLikesCount] = useState<number>(post.likes_count ?? 0);
   const [showComments, setShowComments] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentText, setCommentText] = useState("");
   const [commentsCount, setCommentsCount] = useState(post.comments_count ?? 0);
+  const [loadingComments, setLoadingComments] = useState(false);
   const [loadingComment, setLoadingComment] = useState(false);
+  const [isLiking, setIsLiking] = useState(false);
+  const [hasLoadedComments, setHasLoadedComments] = useState(false);
+  const lastPostIdRef = useRef(post.id);
 
   useEffect(() => {
     setLiked(initialLiked);
-  }, [initialLiked]);
+  }, [post.id, initialLiked]);
 
   useEffect(() => {
-    const loadComments = async () => {
-      const { data } = (await supabase
+    if (lastPostIdRef.current === post.id) return;
+
+    lastPostIdRef.current = post.id;
+    setLiked(initialLiked);
+    setLikesCount(post.likes_count ?? 0);
+    setCommentsCount(post.comments_count ?? 0);
+    setComments(commentsCache.get(post.id) ?? []);
+    setHasLoadedComments(false);
+    setShowComments(false);
+  }, [post.id, post.likes_count, post.comments_count, initialLiked]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const syncCommentsCount = async () => {
+      const { count, error } = await supabase
         .from("comments")
-        .select("*, profiles:user_id (username, avatar_url)")
-        .eq("post_id", post.id)
-        .order("created_at", { ascending: true })) as {
-        data: Comment[] | null;
-      };
-      if (data) {
-        setComments(data);
-        setCommentsCount(data.length);
+        .select("id", { count: "exact", head: true })
+        .eq("post_id", post.id);
+
+      if (!error && typeof count === "number" && !isCancelled) {
+        setCommentsCount(count);
       }
     };
 
-    if (showComments) {
+    void syncCommentsCount();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [post.id, supabase]);
+
+  const loadComments = useCallback(async (forceRefresh = false) => {
+    const cachedComments = commentsCache.get(post.id);
+    if (cachedComments && !forceRefresh) {
+      setComments(cachedComments);
+      setCommentsCount(cachedComments.length);
+      setHasLoadedComments(true);
+      return;
+    }
+
+    if (!cachedComments) {
+      setLoadingComments(true);
+    }
+
+    const { data } = (await supabase
+      .from("comments")
+      .select("id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)")
+      .eq("post_id", post.id)
+      .order("created_at", { ascending: true })) as {
+      data: Comment[] | null;
+    };
+
+    if (data) {
+      commentsCache.set(post.id, data);
+      setComments(data);
+      setCommentsCount(data.length);
+      setHasLoadedComments(true);
+    }
+    setLoadingComments(false);
+  }, [post.id, supabase]);
+
+  useEffect(() => {
+    if (showComments && !hasLoadedComments) {
       loadComments();
     }
+  }, [showComments, hasLoadedComments, loadComments]);
+
+  useEffect(() => {
+    if (!showComments) return;
 
     const channel = supabase
       .channel(`comments-${post.id}`)
@@ -53,8 +113,27 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           table: "comments",
           filter: `post_id=eq.${post.id}`,
         },
-        async () => {
-          await loadComments();
+        async (payload: RealtimePostgresChangesPayload<Comment>) => {
+          const insertedCommentId = (payload.new as Partial<Comment>).id;
+          if (!insertedCommentId) return;
+
+          const { data: insertedComment } = (await supabase
+            .from("comments")
+            .select(
+              "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
+            )
+            .eq("id", insertedCommentId)
+            .single()) as { data: Comment | null };
+
+          if (!insertedComment) return;
+
+          setComments((prev) => {
+            if (prev.some((c) => c.id === insertedComment.id)) return prev;
+            const next = [...prev, insertedComment];
+            commentsCache.set(post.id, next);
+            setCommentsCount(next.length);
+            return next;
+          });
         },
       )
       .on(
@@ -65,8 +144,15 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           table: "comments",
           filter: `post_id=eq.${post.id}`,
         },
-        async () => {
-          await loadComments();
+        (payload: RealtimePostgresChangesPayload<Comment>) => {
+          const deletedCommentId = (payload.old as Partial<Comment>).id;
+          if (!deletedCommentId) return;
+          setComments((prev) => {
+            const next = prev.filter((comment) => comment.id !== deletedCommentId);
+            commentsCache.set(post.id, next);
+            setCommentsCount(next.length);
+            return next;
+          });
         },
       )
       .subscribe();
@@ -74,33 +160,47 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [post.id, supabase, showComments]);
+  }, [post.id, showComments, supabase]);
 
   const handleLike = async () => {
-    if (!currentUserId) return;
+    if (!currentUserId || isLiking) return;
+    setIsLiking(true);
+
+    const previousLiked = liked;
+    const previousCount = likesCount;
     const newLiked = !liked;
-    const newCount = newLiked ? likesCount + 1 : likesCount - 1;
+    const newCount = newLiked
+      ? previousCount + 1
+      : Math.max(previousCount - 1, 0);
+
     setLiked(newLiked);
     setLikesCount(newCount);
 
-    if (newLiked) {
-      const { error } = await supabase
-        .from("likes")
-        .insert({ post_id: post.id, user_id: currentUserId });
-      if (error) {
-        setLiked(false);
-        setLikesCount(likesCount);
+    try {
+      if (newLiked) {
+        const { error } = await supabase
+          .from("likes")
+          .upsert(
+            { post_id: post.id, user_id: currentUserId },
+            { onConflict: "post_id,user_id", ignoreDuplicates: true },
+          );
+        if (error) {
+          setLiked(previousLiked);
+          setLikesCount(previousCount);
+        }
+      } else {
+        const { error } = await supabase
+          .from("likes")
+          .delete()
+          .eq("post_id", post.id)
+          .eq("user_id", currentUserId);
+        if (error) {
+          setLiked(previousLiked);
+          setLikesCount(previousCount);
+        }
       }
-    } else {
-      const { error } = await supabase
-        .from("likes")
-        .delete()
-        .eq("post_id", post.id)
-        .eq("user_id", currentUserId);
-      if (error) {
-        setLiked(true);
-        setLikesCount(likesCount);
-      }
+    } finally {
+      setIsLiking(false);
     }
   };
 
@@ -120,25 +220,48 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
     setComments((prev) => [...prev, optimisticComment]);
     setCommentsCount((prev) => prev + 1);
     setCommentText("");
+    commentsCache.set(post.id, [...comments, optimisticComment]);
 
-    const { error } = await supabase.from("comments").insert({
-      post_id: post.id,
-      user_id: currentUserId,
-      content: optimisticComment.content,
-    });
+    const { data: savedComment, error } = (await supabase
+      .from("comments")
+      .insert({
+        post_id: post.id,
+        user_id: currentUserId,
+        content: optimisticComment.content,
+      })
+      .select(
+        "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
+      )
+      .single()) as { data: Comment | null; error: unknown };
 
     if (error) {
-      setComments((prev) => prev.filter((c) => c.id !== optimisticComment.id));
-      setCommentsCount((prev) => Math.max(prev - 1, 0));
+      setComments((prev) => {
+        const next = prev.filter((c) => c.id !== optimisticComment.id);
+        commentsCache.set(post.id, next);
+        setCommentsCount(next.length);
+        return next;
+      });
       setCommentText(optimisticComment.content);
+    } else if (savedComment) {
+      setComments((prev) => {
+        const next = prev.map((comment) =>
+          comment.id === optimisticComment.id ? savedComment : comment,
+        );
+        commentsCache.set(post.id, next);
+        return next;
+      });
     }
 
     setLoadingComment(false);
   };
 
   const handleDeleteComment = async (commentId: string) => {
-    setComments((prev) => prev.filter((c) => c.id !== commentId));
-    setCommentsCount((prev) => Math.max(prev - 1, 0));
+    setComments((prev) => {
+      const next = prev.filter((c) => c.id !== commentId);
+      commentsCache.set(post.id, next);
+      setCommentsCount(next.length);
+      return next;
+    });
     await supabase.from("comments").delete().eq("id", commentId);
   };
 
@@ -207,12 +330,7 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           </button>
 
           <button
-            onClick={() => {
-              setShowComments((prev) => {
-                if (prev) setComments([]);
-                return !prev;
-              });
-            }}
+            onClick={() => setShowComments((prev) => !prev)}
             className={`flex items-center space-x-1.5 text-sm transition-colors duration-200
               ${showComments ? "text-white/60" : "text-white/30 hover:text-white/60"}`}
           >
@@ -226,7 +344,11 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
             <div className="h-px bg-white/5" />
 
             <div className="space-y-2 max-h-48 overflow-y-auto">
-              {comments.length === 0 ? (
+              {loadingComments ? (
+                <p className="text-xs text-white/20 text-center py-2">
+                  Loading comments...
+                </p>
+              ) : comments.length === 0 ? (
                 <p className="text-xs text-white/20 text-center py-2">
                   No comments yet
                 </p>

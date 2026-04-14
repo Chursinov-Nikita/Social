@@ -9,16 +9,42 @@ interface ChatWindowProps {
   recipient: ChatUser;
 }
 
+const getChatCacheKey = (currentUserId: string, recipientId: string) => {
+  const [first, second] = [currentUserId, recipientId].sort();
+  return `chat-messages:${first}:${second}`;
+};
+
+const MESSAGE_PAGE_SIZE = 50;
+const MAX_CACHED_MESSAGES = 200;
+
 const ChatWindow = ({ recipient }: ChatWindowProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [hasFetchedMessages, setHasFetchedMessages] = useState(false);
   const { user } = useAuth();
-  const supabase = createClient();
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const supabase = React.useMemo(() => createClient(), []);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const cachedMessages = React.useMemo(() => {
+    if (!user) return [] as Message[];
+
+    const cacheKey = getChatCacheKey(user.id, recipient.id);
+    const cachedMessagesRaw = localStorage.getItem(cacheKey);
+    if (!cachedMessagesRaw) return [] as Message[];
+
+    try {
+      return JSON.parse(cachedMessagesRaw) as Message[];
+    } catch {
+      localStorage.removeItem(cacheKey);
+      return [] as Message[];
+    }
+  }, [user, recipient.id]);
 
   useEffect(() => {
     if (!user) return;
+    const cacheKey = getChatCacheKey(user.id, recipient.id);
 
     const loadMessages = async () => {
       const { data } = (await supabase
@@ -27,12 +53,23 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
         .or(
           `and(sender_id.eq.${user.id},receiver_id.eq.${recipient.id}),and(sender_id.eq.${recipient.id},receiver_id.eq.${user.id})`,
         )
-        .order("created_at", { ascending: true })) as {
+        .order("created_at", { ascending: false })
+        .limit(MESSAGE_PAGE_SIZE)) as {
         data: Message[] | null;
         error: unknown;
       };
 
-      if (data) setMessages(data);
+      if (data) {
+        const normalized = [...data].reverse();
+        setMessages(normalized);
+        setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE);
+        localStorage.setItem(
+          cacheKey,
+          JSON.stringify(normalized.slice(-MAX_CACHED_MESSAGES)),
+        );
+      }
+
+      setHasFetchedMessages(true);
     };
 
     loadMessages();
@@ -67,7 +104,56 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
   }, [user, recipient.id, supabase]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!user) return;
+    if (!hasFetchedMessages && messages.length === 0) return;
+    const cacheKey = getChatCacheKey(user.id, recipient.id);
+    localStorage.setItem(
+      cacheKey,
+      JSON.stringify(messages.slice(-MAX_CACHED_MESSAGES)),
+    );
+  }, [messages, user, recipient.id, hasFetchedMessages]);
+
+  const displayedMessages =
+    hasFetchedMessages || messages.length > 0 ? messages : cachedMessages;
+
+  const loadOlderMessages = async () => {
+    if (!user || !displayedMessages.length || loadingOlder || !hasMoreMessages) {
+      return;
+    }
+
+    setLoadingOlder(true);
+    const oldestMessageTime = displayedMessages[0].created_at;
+
+    const { data } = (await supabase
+      .from("messages")
+      .select("*")
+      .or(
+        `and(sender_id.eq.${user.id},receiver_id.eq.${recipient.id}),and(sender_id.eq.${recipient.id},receiver_id.eq.${user.id})`,
+      )
+      .lt("created_at", oldestMessageTime)
+      .order("created_at", { ascending: false })
+      .limit(MESSAGE_PAGE_SIZE)) as {
+      data: Message[] | null;
+      error: unknown;
+    };
+
+    if (data) {
+      const olderMessages = [...data].reverse();
+      setMessages((prev) => [...olderMessages, ...prev]);
+      setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE);
+    }
+
+    setLoadingOlder(false);
+  };
+
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages]);
 
   const sendMessage = async () => {
@@ -108,7 +194,7 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1c1c1e]">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-[#1c1c1e]">
       {/* Шапка */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5 bg-[#2c2c2e]">
         <div className="w-10 h-10 rounded-full bg-[#3a3a3c] flex items-center justify-center text-sm font-bold shrink-0 text-white">
@@ -123,8 +209,22 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
       </div>
 
       {/* Сообщения */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
-        {messages.map((msg) => {
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1"
+      >
+        {displayedMessages.length > 0 && hasMoreMessages && (
+          <div className="flex justify-center pb-3">
+            <button
+              onClick={loadOlderMessages}
+              disabled={loadingOlder}
+              className="text-xs px-3 py-1.5 rounded-full bg-[#2c2c2e] text-white/80 hover:bg-[#3a3a3c] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {loadingOlder ? "Loading..." : "Load older messages"}
+            </button>
+          </div>
+        )}
+        {displayedMessages.map((msg) => {
           const isMe = msg.sender_id === user?.id;
           return (
             <div
@@ -150,7 +250,6 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
             </div>
           );
         })}
-        <div ref={bottomRef} />
       </div>
 
       {/* Поле ввода */}
