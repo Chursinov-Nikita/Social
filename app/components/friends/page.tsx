@@ -2,18 +2,15 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/app/lib/supabase/client";
 import { useAuth } from "@/app/context/auth";
-import type { Friendship } from "@/app/types/friends";
+import type {
+  Friendship,
+  Tab,
+  SearchUser,
+  FriendToRemove,
+} from "@/app/types/friends";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
-type Tab = "friends" | "requests" | "search";
-type SearchUser = {
-  id: string;
-  username: string;
-  relationStatus: "none" | "pending" | "accepted";
-};
-type FriendToRemove = { id: string; username?: string };
-
-export default function FriendsPage() {
+const Friends = () => {
   const { user } = useAuth();
   const supabase = useMemo(() => createClient(), []);
   const [tab, setTab] = useState<Tab>("friends");
@@ -22,7 +19,9 @@ export default function FriendsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [loading, setLoading] = useState(false);
-  const [friendToRemove, setFriendToRemove] = useState<FriendToRemove | null>(null);
+  const [friendToRemove, setFriendToRemove] = useState<FriendToRemove | null>(
+    null,
+  );
   const [removingFriend, setRemovingFriend] = useState(false);
   const friendsCacheKey = user ? `friends-cache:${user.id}` : null;
   const requestsCacheKey = user ? `friend-requests-cache:${user.id}` : null;
@@ -121,8 +120,9 @@ export default function FriendsPage() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "friendships" },
         (payload: RealtimePostgresChangesPayload<{ receiver_id: string }>) => {
-          const newRow = payload.new as { receiver_id: string };
-          if (newRow.receiver_id === user.id) {
+          if (
+            (payload.new as { receiver_id: string }).receiver_id === user.id
+          ) {
             loadRequests();
           }
         },
@@ -176,33 +176,32 @@ export default function FriendsPage() {
         relationMap = new Map(
           (relations ?? []).map(
             (r: { sender_id: string; receiver_id: string; status: string }) => {
-            const counterpart =
-              r.sender_id === user.id ? r.receiver_id : r.sender_id;
-            const status =
-              r.status === "accepted"
-                ? "accepted"
-                : r.status === "pending"
-                  ? "pending"
-                  : "none";
-            return [counterpart, status];
+              const counterpart =
+                r.sender_id === user.id ? r.receiver_id : r.sender_id;
+              const status =
+                r.status === "accepted"
+                  ? "accepted"
+                  : r.status === "pending"
+                    ? "pending"
+                    : "none";
+              return [counterpart, status];
             },
           ),
         );
       }
 
-      const enriched: SearchUser[] = data.map((u: { id: string; username: string }) => ({
-        ...u,
-        relationStatus: relationMap.get(u.id) ?? "none",
-      }));
-
-      setSearchResults(enriched);
+      setSearchResults(
+        data.map((u: { id: string; username: string }) => ({
+          ...u,
+          relationStatus: relationMap.get(u.id) ?? "none",
+        })),
+      );
     }
 
     setLoading(false);
   };
 
   const sendRequest = async (receiverId: string) => {
-    // Проверяем не существует ли уже запрос
     const { data: existing } = await supabase
       .from("friendships")
       .select("id, status")
@@ -212,19 +211,16 @@ export default function FriendsPage() {
       .maybeSingle();
 
     if (existing) {
-      if (existing.status === "pending") {
-        setSearchResults((prev) =>
-          prev.map((u) =>
-            u.id === receiverId ? { ...u, relationStatus: "pending" } : u,
-          ),
-        );
-      } else if (existing.status === "accepted") {
-        setSearchResults((prev) =>
-          prev.map((u) =>
-            u.id === receiverId ? { ...u, relationStatus: "accepted" } : u,
-          ),
-        );
-      }
+      setSearchResults((prev) =>
+        prev.map((u) =>
+          u.id === receiverId
+            ? {
+                ...u,
+                relationStatus: existing.status as SearchUser["relationStatus"],
+              }
+            : u,
+        ),
+      );
       return;
     }
 
@@ -249,13 +245,14 @@ export default function FriendsPage() {
       .update({ status: "accepted" })
       .eq("id", friendshipId);
     if (error) return;
-
     const nextRequests = requests.filter((r) => r.id !== friendshipId);
     const accepted = requests.find((r) => r.id === friendshipId);
     const nextFriends = accepted
-      ? [...friends, { ...accepted, status: "accepted" as Friendship["status"] }]
+      ? [
+          ...friends,
+          { ...accepted, status: "accepted" as Friendship["status"] },
+        ]
       : friends;
-
     setRequests(nextRequests);
     setFriends(nextFriends);
     persistRequests(nextRequests);
@@ -263,9 +260,11 @@ export default function FriendsPage() {
   };
 
   const rejectRequest = async (friendshipId: string) => {
-    const { error } = await supabase.from("friendships").delete().eq("id", friendshipId);
+    const { error } = await supabase
+      .from("friendships")
+      .delete()
+      .eq("id", friendshipId);
     if (error) return;
-
     const nextRequests = requests.filter((r) => r.id !== friendshipId);
     setRequests(nextRequests);
     persistRequests(nextRequests);
@@ -273,7 +272,6 @@ export default function FriendsPage() {
 
   const removeFriend = async () => {
     if (!friendToRemove || removingFriend) return;
-
     setRemovingFriend(true);
     const { error } = await supabase
       .from("friendships")
@@ -281,7 +279,6 @@ export default function FriendsPage() {
       .eq("id", friendToRemove.id);
     setRemovingFriend(false);
     if (error) return;
-
     const nextFriends = friends.filter((f) => f.id !== friendToRemove.id);
     setFriends(nextFriends);
     persistFriends(nextFriends);
@@ -295,27 +292,29 @@ export default function FriendsPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#1c1c1e] text-white">
+    <div className="min-h-screen bg-(--bg-primary) text-(--text-primary)">
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="mb-6">
-          <h1 className="text-lg font-semibold text-white">Friends</h1>
-          <p className="text-white/30 text-sm mt-0.5">
+          <h1 className="text-lg font-semibold text-(--text-primary)">
+            Friends
+          </h1>
+          <p className="text-(--text-primary)/40 text-sm mt-0.5">
             Manage your connections
           </p>
         </div>
 
-        <div className="flex gap-1 bg-[#2c2c2e] rounded-xl p-1 mb-6">
+        <div className="flex gap-1 bg-(--bg-secondary) rounded-xl p-1 mb-6">
           {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                ${tab === t.id ? "bg-[#3a3a3c] text-white" : "text-white/40 hover:text-white"}`}
+                ${tab === t.id ? "bg-(--bg-card) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
             >
               {t.label}
               {t.count !== undefined && t.count > 0 && (
                 <span
-                  className={`text-xs px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-white/10" : "bg-white/5"}`}
+                  className={`text-xs px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-(--text-primary)/10" : "bg-(--text-primary)/5"}`}
                 >
                   {t.count}
                 </span>
@@ -327,7 +326,7 @@ export default function FriendsPage() {
         {tab === "friends" && (
           <div className="space-y-2">
             {friends.length === 0 ? (
-              <div className="text-center py-12 text-white/20 text-sm">
+              <div className="text-center py-12 text-(--text-primary)/20 text-sm">
                 No friends yet — find people in the search tab
               </div>
             ) : (
@@ -336,22 +335,25 @@ export default function FriendsPage() {
                 return (
                   <div
                     key={f.id}
-                    className="flex items-center gap-3 p-4 rounded-xl bg-[#2c2c2e]"
+                    className="flex items-center gap-3 p-4 rounded-xl bg-(--bg-secondary)"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#3a3a3c] flex items-center justify-center text-sm font-bold shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
                       {profile?.username?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">
+                      <p className="text-sm font-medium text-(--text-primary) truncate">
                         {profile?.username}
                       </p>
-                      <p className="text-xs text-white/30">Friend</p>
+                      <p className="text-xs text-(--text-primary)/30">Friend</p>
                     </div>
                     <button
                       onClick={() =>
-                        setFriendToRemove({ id: f.id, username: profile?.username })
+                        setFriendToRemove({
+                          id: f.id,
+                          username: profile?.username,
+                        })
                       }
-                      className="text-xs text-white/30 hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-500/10"
+                      className="text-xs text-(--text-primary)/30 hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-500/10"
                     >
                       Remove
                     </button>
@@ -365,7 +367,7 @@ export default function FriendsPage() {
         {tab === "requests" && (
           <div className="space-y-2">
             {requests.length === 0 ? (
-              <div className="text-center py-12 text-white/20 text-sm">
+              <div className="text-center py-12 text-(--text-primary)/20 text-sm">
                 No pending requests
               </div>
             ) : (
@@ -374,29 +376,29 @@ export default function FriendsPage() {
                 return (
                   <div
                     key={r.id}
-                    className="flex items-center gap-3 p-4 rounded-xl bg-[#2c2c2e]"
+                    className="flex items-center gap-3 p-4 rounded-xl bg-(--bg-secondary)"
                   >
-                    <div className="w-10 h-10 rounded-full bg-[#3a3a3c] flex items-center justify-center text-sm font-bold shrink-0">
+                    <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
                       {profile?.username?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">
+                      <p className="text-sm font-medium text-(--text-primary) truncate">
                         {profile?.username}
                       </p>
-                      <p className="text-xs text-white/30">
+                      <p className="text-xs text-(--text-primary)/30">
                         Wants to be friends
                       </p>
                     </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => acceptRequest(r.id)}
-                        className="text-xs text-white font-medium px-3 py-1.5 rounded-lg bg-[#3a3a3c] hover:bg-[#48484a] transition-colors"
+                        className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors"
                       >
                         Accept
                       </button>
                       <button
                         onClick={() => rejectRequest(r.id)}
-                        className="text-xs text-white/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
+                        className="text-xs text-(--text-primary)/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
                       >
                         Decline
                       </button>
@@ -417,12 +419,12 @@ export default function FriendsPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                className="flex-1 bg-[#2c2c2e] border border-white/5 focus:border-white/20 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 outline-none transition-colors"
+                className="flex-1 bg-(--bg-secondary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl px-4 py-2.5 text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 outline-none transition-colors"
               />
               <button
                 onClick={handleSearch}
                 disabled={loading}
-                className="px-4 py-2.5 rounded-xl bg-[#3a3a3c] hover:bg-[#48484a] text-sm font-medium text-white transition-colors disabled:opacity-50"
+                className="px-4 py-2.5 rounded-xl bg-(--bg-card) hover:opacity-80 text-sm font-medium text-(--text-primary) transition-colors disabled:opacity-50"
               >
                 {loading ? "..." : "Search"}
               </button>
@@ -431,20 +433,20 @@ export default function FriendsPage() {
               {searchResults.map((u) => (
                 <div
                   key={u.id}
-                  className="flex items-center gap-3 p-4 rounded-xl bg-[#2c2c2e]"
+                  className="flex items-center gap-3 p-4 rounded-xl bg-(--bg-secondary)"
                 >
-                  <div className="w-10 h-10 rounded-full bg-[#3a3a3c] flex items-center justify-center text-sm font-bold shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
                     {u.username.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-white truncate">
+                    <p className="text-sm font-medium text-(--text-primary) truncate">
                       {u.username}
                     </p>
                   </div>
                   <button
                     onClick={() => sendRequest(u.id)}
                     disabled={u.relationStatus !== "none"}
-                    className="text-xs text-white font-medium px-3 py-1.5 rounded-lg bg-[#3a3a3c] hover:bg-[#48484a] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {u.relationStatus === "pending"
                       ? "Request sent"
@@ -458,11 +460,14 @@ export default function FriendsPage() {
           </div>
         )}
       </div>
+
       {friendToRemove && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2c2c2e] p-5 shadow-2xl">
-            <h2 className="text-base font-semibold text-white">Remove friend?</h2>
-            <p className="mt-2 text-sm text-white/70">
+          <div className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl">
+            <h2 className="text-base font-semibold text-(--text-primary)">
+              Remove friend?
+            </h2>
+            <p className="mt-2 text-sm text-(--text-primary)/60">
               {friendToRemove.username
                 ? `Are you sure you want to remove ${friendToRemove.username} from your friends list?`
                 : "Are you sure you want to remove this user from your friends list?"}
@@ -471,7 +476,7 @@ export default function FriendsPage() {
               <button
                 onClick={() => setFriendToRemove(null)}
                 disabled={removingFriend}
-                className="px-3 py-1.5 rounded-lg text-sm text-white/70 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-60"
+                className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-colors disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -488,4 +493,6 @@ export default function FriendsPage() {
       )}
     </div>
   );
-}
+};
+
+export default Friends;

@@ -15,7 +15,8 @@
     "lucide-react": "^1.7.0",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-intersection-observer": "^10.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

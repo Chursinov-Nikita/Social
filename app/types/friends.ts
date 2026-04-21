@@ -12,3 +12,13 @@ export interface Friendship {
     avatar_url: string | null;
   };
 }
+
+export type Tab = "friends" | "requests" | "search";
+
+export type SearchUser = {
+  id: string;
+  username: string;
+  relationStatus: "none" | "pending" | "accepted";
+};
+
+export type FriendToRemove = { id: string; username?: string };

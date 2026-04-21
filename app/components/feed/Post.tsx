@@ -24,7 +24,7 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
   const [loadingComments, setLoadingComments] = useState(false);
   const [loadingComment, setLoadingComment] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
-  const [hasLoadedComments, setHasLoadedComments] = useState(false);
+  const [commentToDelete, setCommentToDelete] = useState<string | null>(null);
   const lastPostIdRef = useRef(post.id);
 
   useEffect(() => {
@@ -33,76 +33,48 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
 
   useEffect(() => {
     if (lastPostIdRef.current === post.id) return;
-
     lastPostIdRef.current = post.id;
     setLiked(initialLiked);
     setLikesCount(post.likes_count ?? 0);
     setCommentsCount(post.comments_count ?? 0);
     setComments(commentsCache.get(post.id) ?? []);
-    setHasLoadedComments(false);
     setShowComments(false);
   }, [post.id, post.likes_count, post.comments_count, initialLiked]);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    const syncCommentsCount = async () => {
-      const { count, error } = await supabase
-        .from("comments")
-        .select("id", { count: "exact", head: true })
-        .eq("post_id", post.id);
-
-      if (!error && typeof count === "number" && !isCancelled) {
-        setCommentsCount(count);
+  const loadComments = useCallback(
+    async (forceRefresh = false) => {
+      const cachedComments = commentsCache.get(post.id);
+      if (cachedComments && !forceRefresh) {
+        setComments(cachedComments);
+        setCommentsCount(cachedComments.length);
+        return;
       }
-    };
-
-    void syncCommentsCount();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [post.id, supabase]);
-
-  const loadComments = useCallback(async (forceRefresh = false) => {
-    const cachedComments = commentsCache.get(post.id);
-    if (cachedComments && !forceRefresh) {
-      setComments(cachedComments);
-      setCommentsCount(cachedComments.length);
-      setHasLoadedComments(true);
-      return;
-    }
-
-    if (!cachedComments) {
-      setLoadingComments(true);
-    }
-
-    const { data } = (await supabase
-      .from("comments")
-      .select("id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)")
-      .eq("post_id", post.id)
-      .order("created_at", { ascending: true })) as {
-      data: Comment[] | null;
-    };
-
-    if (data) {
-      commentsCache.set(post.id, data);
-      setComments(data);
-      setCommentsCount(data.length);
-      setHasLoadedComments(true);
-    }
-    setLoadingComments(false);
-  }, [post.id, supabase]);
+      if (!cachedComments) setLoadingComments(true);
+      const { data } = (await supabase
+        .from("comments")
+        .select(
+          "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
+        )
+        .eq("post_id", post.id)
+        .order("created_at", { ascending: true })) as {
+        data: Comment[] | null;
+      };
+      if (data) {
+        commentsCache.set(post.id, data);
+        setComments(data);
+        setCommentsCount(data.length);
+      }
+      setLoadingComments(false);
+    },
+    [post.id, supabase],
+  );
 
   useEffect(() => {
-    if (showComments && !hasLoadedComments) {
-      loadComments();
-    }
-  }, [showComments, hasLoadedComments, loadComments]);
+    loadComments();
+  }, [loadComments]);
 
   useEffect(() => {
     if (!showComments) return;
-
     const channel = supabase
       .channel(`comments-${post.id}`)
       .on(
@@ -114,22 +86,19 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           filter: `post_id=eq.${post.id}`,
         },
         async (payload: RealtimePostgresChangesPayload<Comment>) => {
-          const insertedCommentId = (payload.new as Partial<Comment>).id;
-          if (!insertedCommentId) return;
-
-          const { data: insertedComment } = (await supabase
+          const id = (payload.new as Partial<Comment>).id;
+          if (!id) return;
+          const { data } = (await supabase
             .from("comments")
             .select(
               "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
             )
-            .eq("id", insertedCommentId)
+            .eq("id", id)
             .single()) as { data: Comment | null };
-
-          if (!insertedComment) return;
-
+          if (!data) return;
           setComments((prev) => {
-            if (prev.some((c) => c.id === insertedComment.id)) return prev;
-            const next = [...prev, insertedComment];
+            if (prev.some((c) => c.id === data.id)) return prev;
+            const next = [...prev, data];
             commentsCache.set(post.id, next);
             setCommentsCount(next.length);
             return next;
@@ -145,10 +114,10 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           filter: `post_id=eq.${post.id}`,
         },
         (payload: RealtimePostgresChangesPayload<Comment>) => {
-          const deletedCommentId = (payload.old as Partial<Comment>).id;
-          if (!deletedCommentId) return;
+          const deletedId = (payload.old as Partial<Comment>).id;
+          if (!deletedId) return;
           setComments((prev) => {
-            const next = prev.filter((comment) => comment.id !== deletedCommentId);
+            const next = prev.filter((c) => c.id !== deletedId);
             commentsCache.set(post.id, next);
             setCommentsCount(next.length);
             return next;
@@ -156,7 +125,6 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
         },
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
@@ -165,17 +133,13 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
   const handleLike = async () => {
     if (!currentUserId || isLiking) return;
     setIsLiking(true);
-
     const previousLiked = liked;
     const previousCount = likesCount;
     const newLiked = !liked;
-    const newCount = newLiked
-      ? previousCount + 1
-      : Math.max(previousCount - 1, 0);
-
     setLiked(newLiked);
-    setLikesCount(newCount);
-
+    setLikesCount(
+      newLiked ? previousCount + 1 : Math.max(previousCount - 1, 0),
+    );
     try {
       if (newLiked) {
         const { error } = await supabase
@@ -207,7 +171,6 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
   const handleComment = async () => {
     if (!commentText.trim() || !currentUserId) return;
     setLoadingComment(true);
-
     const optimisticComment: Comment = {
       id: crypto.randomUUID(),
       post_id: post.id,
@@ -216,12 +179,13 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
       created_at: new Date().toISOString(),
       profiles: { username: "Вы", avatar_url: null },
     };
-
-    setComments((prev) => [...prev, optimisticComment]);
+    setComments((prev) => {
+      const next = [...prev, optimisticComment];
+      commentsCache.set(post.id, next);
+      return next;
+    });
     setCommentsCount((prev) => prev + 1);
     setCommentText("");
-    commentsCache.set(post.id, [...comments, optimisticComment]);
-
     const { data: savedComment, error } = (await supabase
       .from("comments")
       .insert({
@@ -233,7 +197,6 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
         "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
       )
       .single()) as { data: Comment | null; error: unknown };
-
     if (error) {
       setComments((prev) => {
         const next = prev.filter((c) => c.id !== optimisticComment.id);
@@ -244,33 +207,33 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
       setCommentText(optimisticComment.content);
     } else if (savedComment) {
       setComments((prev) => {
-        const next = prev.map((comment) =>
-          comment.id === optimisticComment.id ? savedComment : comment,
+        const next = prev.map((c) =>
+          c.id === optimisticComment.id ? savedComment : c,
         );
         commentsCache.set(post.id, next);
         return next;
       });
     }
-
     setLoadingComment(false);
   };
 
-  const handleDeleteComment = async (commentId: string) => {
+  const confirmDeleteComment = async () => {
+    if (!commentToDelete) return;
     setComments((prev) => {
-      const next = prev.filter((c) => c.id !== commentId);
+      const next = prev.filter((c) => c.id !== commentToDelete);
       commentsCache.set(post.id, next);
       setCommentsCount(next.length);
       return next;
     });
-    await supabase.from("comments").delete().eq("id", commentId);
+    await supabase.from("comments").delete().eq("id", commentToDelete);
+    setCommentToDelete(null);
   };
 
   const username = post.profiles?.username ?? "Аноним";
   const avatarUrl = post.profiles?.avatar_url ?? null;
 
   return (
-    <div className="rounded-xl bg-[#2c2c2e] overflow-hidden">
-      {/* Header */}
+    <div className="rounded-xl bg-(--bg-secondary) overflow-hidden">
       <div className="px-4 pt-4 pb-2 flex items-center space-x-3">
         {avatarUrl ? (
           <Image
@@ -281,15 +244,16 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
             alt={`Аватар ${username}`}
           />
         ) : (
-          <div className="w-10 h-10 rounded-full bg-[#3a3a3c] flex items-center justify-center text-sm font-bold text-white shrink-0">
+          <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold text-(--text-primary) shrink-0">
             {username.charAt(0).toUpperCase()}
           </div>
         )}
-        <span className="font-semibold text-sm text-white">{username}</span>
+        <span className="font-semibold text-sm text-(--text-primary)">
+          {username}
+        </span>
       </div>
 
-      {/* Image */}
-      {post.image_url ? (
+      {post.image_url && (
         <div className="relative w-full aspect-video">
           <Image
             src={post.image_url}
@@ -302,24 +266,22 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
             }
           />
         </div>
-      ) : null}
+      )}
 
-      {/* Content */}
       <div className="px-4 pb-4 pt-2 space-y-3">
         {post.content && (
-          <p className="text-sm text-white/80 leading-relaxed">
+          <p className="text-sm text-(--text-primary)/80 leading-relaxed">
             {post.content}
           </p>
         )}
 
-        <div className="h-px bg-white/5" />
+        <div className="h-px bg-(--border)" />
 
         <div className="flex space-x-4">
           <button
             onClick={handleLike}
             disabled={!currentUserId}
-            className={`flex items-center space-x-1.5 text-sm transition-all duration-200 disabled:opacity-30
-              ${liked ? "text-red-400" : "text-white/30 hover:text-red-400"}`}
+            className={`flex items-center space-x-1.5 text-sm transition-all duration-200 disabled:opacity-30 ${liked ? "text-red-400" : "text-(--text-primary)/30 hover:text-red-400"}`}
           >
             {liked ? (
               <HeartSolidIcon className="w-5 h-5" />
@@ -331,47 +293,45 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
 
           <button
             onClick={() => setShowComments((prev) => !prev)}
-            className={`flex items-center space-x-1.5 text-sm transition-colors duration-200
-              ${showComments ? "text-white/60" : "text-white/30 hover:text-white/60"}`}
+            className={`flex items-center space-x-1.5 text-sm transition-colors duration-200 ${showComments ? "text-(--text-primary)/60" : "text-(--text-primary)/30 hover:text-(--text-primary)/60"}`}
           >
             <ChatBubbleLeftIcon className="w-5 h-5" />
-            <span>{commentsCount}</span>
+            <span suppressHydrationWarning>{commentsCount}</span>
           </button>
         </div>
 
         {showComments && (
           <div className="space-y-3 pt-1">
-            <div className="h-px bg-white/5" />
-
-            <div className="space-y-2 max-h-48 overflow-y-auto">
+            <div className="h-px bg-(--border)" />
+            <div className="space-y-3 max-h-48 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]">
               {loadingComments ? (
-                <p className="text-xs text-white/20 text-center py-2">
+                <p className="text-xs text-(--text-primary)/20 text-center py-2">
                   Loading comments...
                 </p>
               ) : comments.length === 0 ? (
-                <p className="text-xs text-white/20 text-center py-2">
+                <p className="text-xs text-(--text-primary)/20 text-center py-2">
                   No comments yet
                 </p>
               ) : (
                 comments.map((comment) => (
                   <div key={comment.id} className="flex items-start gap-2">
-                    <div className="w-7 h-7 rounded-full bg-[#3a3a3c] flex items-center justify-center text-xs font-bold text-white shrink-0">
+                    <div className="w-7 h-7 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary) shrink-0">
                       {comment.profiles?.username?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="text-xs font-medium text-white/70 mr-1">
+                      <span className="text-xs font-medium text-(--text-primary)/70 mr-1">
                         {comment.profiles?.username}
                       </span>
-                      <p className="text-xs text-white/50 leading-relaxed">
+                      <p className="text-xs text-(--text-primary)/50 leading-relaxed">
                         {comment.content}
                       </p>
                     </div>
                     {comment.user_id === currentUserId && (
                       <button
-                        onClick={() => handleDeleteComment(comment.id)}
-                        className="text-white/20 hover:text-red-400 transition-colors shrink-0"
+                        onClick={() => setCommentToDelete(comment.id)}
+                        className="text-(--text-primary)/20 hover:text-red-400 transition-colors shrink-0"
                       >
-                        <XMarkIcon className="w-4 h-4" />
+                        <XMarkIcon className="w-4 h-4 mr-3" />
                       </button>
                     )}
                   </div>
@@ -387,12 +347,12 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
                   onChange={(e) => setCommentText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleComment()}
                   placeholder="Write a comment..."
-                  className="flex-1 bg-[#1c1c1e] border border-white/5 focus:border-white/20 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 outline-none transition-colors"
+                  className="flex-1 bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl px-3 py-2 text-xs text-(--text-primary) placeholder:text-(--text-primary)/20 outline-none transition-colors"
                 />
                 <button
                   onClick={handleComment}
                   disabled={loadingComment || !commentText.trim()}
-                  className="px-3 py-2 rounded-xl bg-[#3a3a3c] hover:bg-[#48484a] text-xs text-white disabled:opacity-30 transition-colors"
+                  className="px-3 py-2 rounded-xl bg-(--bg-card) hover:opacity-80 text-xs text-(--text-primary) disabled:opacity-30 transition-colors"
                 >
                   Send
                 </button>
@@ -401,6 +361,34 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           </div>
         )}
       </div>
+
+      {commentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl">
+            <h2 className="text-base font-semibold text-(--text-primary)">
+              Delete comment?
+            </h2>
+            <p className="mt-2 text-sm text-(--text-primary)/60">
+              Are you sure you want to delete this comment? This action cannot
+              be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setCommentToDelete(null)}
+                className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteComment}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

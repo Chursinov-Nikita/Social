@@ -1,14 +1,15 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/app/lib/supabase/client";
 import { useAuth } from "@/app/context/auth";
 import type { Notification } from "@/app/types/notifications";
 import { typeLabel } from "@/app/types/notifications";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import useUnreadNotifications from "@/app/hooks/useUnreadNotification";
 
-export default function NotificationsPage() {
+const Notifications = () => {
   const { user } = useAuth();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -18,56 +19,59 @@ export default function NotificationsPage() {
 
   const loadNotifications = useCallback(async () => {
     if (!user) return;
+
     const { data } = (await supabase
       .from("notifications")
       .select("*, sender:sender_id (username, avatar_url)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(50)) as { data: Notification[] | null; error: unknown };
+      .limit(50)) as { data: Notification[] | null };
 
-    if (data) {
-      setNotifications(data);
+    if (!data) return setLoading(false);
 
-      const requestSenderIds = [
-        ...new Set(
-          data
-            .filter((n) => n.type === "friend_request")
-            .map((n) => n.sender_id),
+    setNotifications(data);
+
+    const requestSenderIds = [
+      ...new Set(
+        data.filter((n) => n.type === "friend_request").map((n) => n.sender_id),
+      ),
+    ];
+
+    if (requestSenderIds.length > 0) {
+      const { data: pendingRequests } = await supabase
+        .from("friendships")
+        .select("sender_id")
+        .eq("receiver_id", user.id)
+        .eq("status", "pending")
+        .in("sender_id", requestSenderIds);
+
+      const pendingSenders = new Set(
+        (pendingRequests ?? []).map(
+          (item: { sender_id: string }) => item.sender_id,
         ),
-      ];
+      );
 
-      if (requestSenderIds.length > 0) {
-        const { data: pendingRequests } = await supabase
-          .from("friendships")
-          .select("sender_id")
-          .eq("receiver_id", user.id)
-          .eq("status", "pending")
-          .in("sender_id", requestSenderIds);
-
-        const pendingSenders = new Set(
-          (pendingRequests ?? []).map((item: { sender_id: string }) => item.sender_id),
-        );
-
-        setActionableRequestIds(
-          new Set(
-            data
-              .filter(
-                (n) =>
-                  n.type === "friend_request" && pendingSenders.has(n.sender_id),
-              )
-              .map((n) => n.id),
-          ),
-        );
-      } else {
-        setActionableRequestIds(new Set());
-      }
+      setActionableRequestIds(
+        new Set(
+          data
+            .filter(
+              (n) =>
+                n.type === "friend_request" && pendingSenders.has(n.sender_id),
+            )
+            .map((n) => n.id),
+        ),
+      );
+    } else {
+      setActionableRequestIds(new Set());
     }
+
     setLoading(false);
   }, [user, supabase]);
 
   useEffect(() => {
     if (!user) return;
-    loadNotifications();
+
+    void loadNotifications();
 
     const channel = supabase
       .channel("notifications-channel")
@@ -75,9 +79,8 @@ export default function NotificationsPage() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications" },
         (payload: RealtimePostgresChangesPayload<Notification>) => {
-          const newNotif = payload.new as Notification;
-          if (newNotif.user_id === user.id) {
-            loadNotifications();
+          if ((payload.new as Notification).user_id === user.id) {
+            void loadNotifications();
           }
         },
       )
@@ -110,7 +113,6 @@ export default function NotificationsPage() {
     action: "accept" | "decline",
   ) => {
     if (!user || actionLoadingId === notification.id) return;
-
     setActionLoadingId(notification.id);
 
     try {
@@ -148,24 +150,22 @@ export default function NotificationsPage() {
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unreadCount = useUnreadNotifications();
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr + "Z"); // добавляем Z чтобы парсить как UTC
-    return date.toLocaleString("ru", {
+  const formatDate = (dateStr: string) =>
+    new Date(dateStr + "Z").toLocaleString("ru", {
       day: "numeric",
       month: "short",
       hour: "2-digit",
       minute: "2-digit",
     });
-  };
 
   return (
-    <div className="min-h-screen bg-[#1c1c1e] text-white">
+    <div className="min-h-screen bg-(--bg-primary) text-(--text-primary)">
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-lg font-semibold text-white flex items-center gap-2">
+            <h1 className="text-lg font-semibold text-(--text-primary) flex items-center gap-2">
               Notifications
               {unreadCount > 0 && (
                 <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">
@@ -173,12 +173,14 @@ export default function NotificationsPage() {
                 </span>
               )}
             </h1>
-            <p className="text-white/30 text-sm mt-0.5">Your activity</p>
+            <p className="text-(--text-primary)/40 text-sm mt-0.5">
+              Your activity
+            </p>
           </div>
           {unreadCount > 0 && (
             <button
               onClick={markAllRead}
-              className="text-xs text-white/40 hover:text-white transition-colors"
+              className="text-xs text-(--text-primary)/40 hover:text-(--text-primary) transition-colors"
             >
               Mark all as read
             </button>
@@ -187,10 +189,10 @@ export default function NotificationsPage() {
 
         {loading ? (
           <div className="flex justify-center py-12">
-            <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-(--text-primary)/20 border-t-(--text-primary)/60 rounded-full animate-spin" />
           </div>
         ) : notifications.length === 0 ? (
-          <div className="text-center py-12 text-white/20 text-sm">
+          <div className="text-center py-12 text-(--text-primary)/20 text-sm">
             No notifications yet
           </div>
         ) : (
@@ -199,28 +201,28 @@ export default function NotificationsPage() {
               <div
                 key={n.id}
                 onClick={() => !n.read && markRead(n.id)}
-                className={`flex items-center gap-3 p-4 rounded-xl transition-colors cursor-pointer
-                  ${n.read ? "bg-[#2c2c2e]" : "bg-[#2c2c2e] border border-white/10"}`}
+                className={`flex items-center gap-3 p-4 rounded-xl transition-colors cursor-pointer bg-(--bg-secondary)
+                  ${!n.read ? "border border-(--border)" : ""}`}
               >
-                {/* Индикатор непрочитанного */}
                 <div
-                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${n.read ? "bg-transparent" : "bg-white"}`}
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${n.read ? "bg-transparent" : "bg-(--text-primary)"}`}
                 />
 
-                {/* Аватар отправителя */}
-                <div className="w-9 h-9 rounded-full bg-[#3a3a3c] flex items-center justify-center text-sm font-bold shrink-0">
+                <div className="w-9 h-9 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
                   {n.sender?.username?.charAt(0).toUpperCase()}
                 </div>
 
-                {/* Текст */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white truncate">
+                  <p className="text-sm text-(--text-primary) truncate">
                     <span className="font-medium">{n.sender?.username}</span>{" "}
-                    <span className="text-white/50">{typeLabel(n.type)}</span>
+                    <span className="text-(--text-primary)/50">
+                      {typeLabel(n.type)}
+                    </span>
                   </p>
-                  <p className="text-xs text-white/30 mt-0.5">
+                  <p className="text-xs text-(--text-primary)/30 mt-0.5">
                     {formatDate(n.created_at)}
                   </p>
+
                   {n.type === "friend_request" &&
                     actionableRequestIds.has(n.id) && (
                       <div className="mt-3 flex gap-2">
@@ -230,7 +232,7 @@ export default function NotificationsPage() {
                             void handleRequestAction(n, "accept");
                           }}
                           disabled={actionLoadingId === n.id}
-                          className="text-xs text-white font-medium px-3 py-1.5 rounded-lg bg-[#3a3a3c] hover:bg-[#48484a] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                         >
                           Accept
                         </button>
@@ -240,7 +242,7 @@ export default function NotificationsPage() {
                             void handleRequestAction(n, "decline");
                           }}
                           disabled={actionLoadingId === n.id}
-                          className="text-xs text-white/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                          className="text-xs text-(--text-primary)/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                         >
                           Decline
                         </button>
@@ -254,4 +256,6 @@ export default function NotificationsPage() {
       </div>
     </div>
   );
-}
+};
+
+export default Notifications;

@@ -18,8 +18,7 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
     const file = e.target.files?.[0] || null;
     setImage(file);
     if (file) {
-      const url = URL.createObjectURL(file);
-      setPreview(url);
+      setPreview(URL.createObjectURL(file));
     } else {
       setPreview(null);
     }
@@ -46,7 +45,6 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
           .from("posts")
           .upload(fileName, image);
         if (uploadError) {
-          console.error("Ошибка загрузки файла:", uploadError.message);
           alert(`Не удалось загрузить фото: ${uploadError.message}`);
           setLoading(false);
           return;
@@ -60,7 +58,6 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-
       const { data: newPost, error } = await supabase
         .from("posts")
         .insert({ content, image_url: imageUrl, user_id: user?.id })
@@ -68,7 +65,6 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
         .single();
 
       if (error) throw error;
-
       onPostCreated?.(newPost);
       setContent("");
       removeImage();
@@ -82,14 +78,14 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-xl bg-[#2c2c2e] p-4 space-y-3"
+      className="rounded-xl bg-(--bg-secondary) p-4 space-y-3"
     >
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
         placeholder="What's on your mind?"
         rows={3}
-        className="w-full bg-[#1c1c1e] border border-white/5 focus:border-white/20 rounded-xl p-3 resize-none focus:outline-none text-sm text-white placeholder-white/20 transition-colors"
+        className="w-full bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl p-3 resize-none focus:outline-none text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 transition-colors"
       />
 
       {preview && (
@@ -97,7 +93,7 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={preview}
-            alt="Превью изображения"
+            alt="Превью"
             className="w-full rounded-xl object-cover max-h-64"
           />
           <button
@@ -111,7 +107,7 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
       )}
 
       <div className="flex items-center justify-between">
-        <label className="cursor-pointer flex items-center gap-1.5 text-sm text-white/30 hover:text-white/60 transition-colors duration-200">
+        <label className="cursor-pointer flex items-center gap-1.5 text-sm text-(--text-primary)/30 hover:text-(--text-primary)/60 transition-colors duration-200">
           <svg
             className="w-5 h-5"
             fill="none"
@@ -137,7 +133,7 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
         <button
           type="submit"
           disabled={loading || (!content.trim() && !image)}
-          className="px-5 py-1.5 rounded-xl text-sm font-semibold text-white bg-[#3a3a3c] hover:bg-[#48484a] disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
+          className="px-5 py-1.5 rounded-xl text-sm font-semibold text-(--text-primary) bg-(--bg-card) hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
         >
           {loading ? (
             <span className="flex items-center gap-2">
