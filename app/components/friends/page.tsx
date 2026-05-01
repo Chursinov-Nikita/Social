@@ -9,9 +9,13 @@ import type {
   FriendToRemove,
 } from "@/app/types/friends";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { useLang } from "@/app/context/language";
+import { t } from "@/app/translation/translation";
 
 const Friends = () => {
   const { user } = useAuth();
+  const { lang } = useLang();
+  const tr = t[lang];
   const supabase = useMemo(() => createClient(), []);
   const [tab, setTab] = useState<Tab>("friends");
   const [friends, setFriends] = useState<Friendship[]>([]);
@@ -72,7 +76,6 @@ const Friends = () => {
 
   useEffect(() => {
     if (!friendsCacheKey || !requestsCacheKey) return;
-
     const cachedFriends = localStorage.getItem(friendsCacheKey);
     const cachedFriendsParsed = cachedFriends
       ? (() => {
@@ -84,7 +87,6 @@ const Friends = () => {
           }
         })()
       : null;
-
     const cachedRequests = localStorage.getItem(requestsCacheKey);
     const cachedRequestsParsed = cachedRequests
       ? (() => {
@@ -96,35 +98,27 @@ const Friends = () => {
           }
         })()
       : null;
-
-    const hydrationTimer = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (cachedFriendsParsed) setFriends(cachedFriendsParsed);
       if (cachedRequestsParsed) setRequests(cachedRequestsParsed);
     }, 0);
-
-    return () => {
-      window.clearTimeout(hydrationTimer);
-    };
+    return () => window.clearTimeout(timer);
   }, [friendsCacheKey, requestsCacheKey]);
 
   useEffect(() => {
     if (!user) return;
-    const initialSyncTimer = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       void loadFriends();
       void loadRequests();
     }, 0);
-
     const channel = supabase
       .channel("friendships-channel")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "friendships" },
         (payload: RealtimePostgresChangesPayload<{ receiver_id: string }>) => {
-          if (
-            (payload.new as { receiver_id: string }).receiver_id === user.id
-          ) {
+          if ((payload.new as { receiver_id: string }).receiver_id === user.id)
             loadRequests();
-          }
         },
       )
       .on(
@@ -144,9 +138,8 @@ const Friends = () => {
         },
       )
       .subscribe(() => {});
-
     return () => {
-      window.clearTimeout(initialSyncTimer);
+      window.clearTimeout(timer);
       supabase.removeChannel(channel);
     };
   }, [user, loadFriends, loadRequests, supabase]);
@@ -160,11 +153,9 @@ const Friends = () => {
       .ilike("username", `%${searchQuery}%`)
       .neq("id", user?.id ?? "")
       .limit(10);
-
     if (data && user) {
       const ids = data.map((u: { id: string }) => u.id);
       let relationMap = new Map<string, SearchUser["relationStatus"]>();
-
       if (ids.length > 0) {
         const { data: relations } = await supabase
           .from("friendships")
@@ -172,7 +163,6 @@ const Friends = () => {
           .or(
             `and(sender_id.eq.${user.id},receiver_id.in.(${ids.join(",")})),and(sender_id.in.(${ids.join(",")}),receiver_id.eq.${user.id})`,
           );
-
         relationMap = new Map(
           (relations ?? []).map(
             (r: { sender_id: string; receiver_id: string; status: string }) => {
@@ -189,7 +179,6 @@ const Friends = () => {
           ),
         );
       }
-
       setSearchResults(
         data.map((u: { id: string; username: string }) => ({
           ...u,
@@ -197,7 +186,6 @@ const Friends = () => {
         })),
       );
     }
-
     setLoading(false);
   };
 
@@ -209,7 +197,6 @@ const Friends = () => {
         `and(sender_id.eq.${user?.id},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${user?.id})`,
       )
       .maybeSingle();
-
     if (existing) {
       setSearchResults((prev) =>
         prev.map((u) =>
@@ -223,20 +210,19 @@ const Friends = () => {
       );
       return;
     }
-
-    const { error } = await supabase.from("friendships").insert({
-      sender_id: user?.id,
-      receiver_id: receiverId,
-      status: "pending",
-    });
-
-    if (!error) {
+    const { error } = await supabase
+      .from("friendships")
+      .insert({
+        sender_id: user?.id,
+        receiver_id: receiverId,
+        status: "pending",
+      });
+    if (!error)
       setSearchResults((prev) =>
         prev.map((u) =>
           u.id === receiverId ? { ...u, relationStatus: "pending" } : u,
         ),
       );
-    }
   };
 
   const acceptRequest = async (friendshipId: string) => {
@@ -286,9 +272,9 @@ const Friends = () => {
   };
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
-    { id: "friends", label: "Friends", count: friends.length },
-    { id: "requests", label: "Requests", count: requests.length },
-    { id: "search", label: "Find People" },
+    { id: "friends", label: tr.friendsTab, count: friends.length },
+    { id: "requests", label: tr.requestsTab, count: requests.length },
+    { id: "search", label: tr.findPeople },
   ];
 
   return (
@@ -296,27 +282,27 @@ const Friends = () => {
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="mb-6">
           <h1 className="text-lg font-semibold text-(--text-primary)">
-            Friends
+            {tr.friendsTitle}
           </h1>
           <p className="text-(--text-primary)/40 text-sm mt-0.5">
-            Manage your connections
+            {tr.manageConnections}
           </p>
         </div>
 
         <div className="flex gap-1 bg-(--bg-secondary) rounded-xl p-1 mb-6">
-          {tabs.map((t) => (
+          {tabs.map((tab_item) => (
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+              key={tab_item.id}
+              onClick={() => setTab(tab_item.id)}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                ${tab === t.id ? "bg-(--bg-card) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
+                ${tab === tab_item.id ? "bg-(--bg-card) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
             >
-              {t.label}
-              {t.count !== undefined && t.count > 0 && (
+              {tab_item.label}
+              {tab_item.count !== undefined && tab_item.count > 0 && (
                 <span
-                  className={`text-xs px-1.5 py-0.5 rounded-full ${tab === t.id ? "bg-(--text-primary)/10" : "bg-(--text-primary)/5"}`}
+                  className={`text-xs px-1.5 py-0.5 rounded-full ${tab === tab_item.id ? "bg-(--text-primary)/10" : "bg-(--text-primary)/5"}`}
                 >
-                  {t.count}
+                  {tab_item.count}
                 </span>
               )}
             </button>
@@ -327,7 +313,7 @@ const Friends = () => {
           <div className="space-y-2">
             {friends.length === 0 ? (
               <div className="text-center py-12 text-(--text-primary)/20 text-sm">
-                No friends yet — find people in the search tab
+                {tr.noFriendsYet}
               </div>
             ) : (
               friends.map((f) => {
@@ -344,7 +330,9 @@ const Friends = () => {
                       <p className="text-sm font-medium text-(--text-primary) truncate">
                         {profile?.username}
                       </p>
-                      <p className="text-xs text-(--text-primary)/30">Friend</p>
+                      <p className="text-xs text-(--text-primary)/30">
+                        {tr.friend}
+                      </p>
                     </div>
                     <button
                       onClick={() =>
@@ -355,7 +343,7 @@ const Friends = () => {
                       }
                       className="text-xs text-(--text-primary)/30 hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-red-500/10"
                     >
-                      Remove
+                      {tr.remove}
                     </button>
                   </div>
                 );
@@ -368,7 +356,7 @@ const Friends = () => {
           <div className="space-y-2">
             {requests.length === 0 ? (
               <div className="text-center py-12 text-(--text-primary)/20 text-sm">
-                No pending requests
+                {tr.noPendingRequests}
               </div>
             ) : (
               requests.map((r) => {
@@ -386,7 +374,7 @@ const Friends = () => {
                         {profile?.username}
                       </p>
                       <p className="text-xs text-(--text-primary)/30">
-                        Wants to be friends
+                        {tr.wantsToBeFriends}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -394,13 +382,13 @@ const Friends = () => {
                         onClick={() => acceptRequest(r.id)}
                         className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors"
                       >
-                        Accept
+                        {tr.accept}
                       </button>
                       <button
                         onClick={() => rejectRequest(r.id)}
                         className="text-xs text-(--text-primary)/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
                       >
-                        Decline
+                        {tr.decline}
                       </button>
                     </div>
                   </div>
@@ -415,7 +403,7 @@ const Friends = () => {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Search by username..."
+                placeholder={tr.searchByUsername}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
@@ -426,7 +414,7 @@ const Friends = () => {
                 disabled={loading}
                 className="px-4 py-2.5 rounded-xl bg-(--bg-card) hover:opacity-80 text-sm font-medium text-(--text-primary) transition-colors disabled:opacity-50"
               >
-                {loading ? "..." : "Search"}
+                {loading ? "..." : tr.search}
               </button>
             </div>
             <div className="space-y-2">
@@ -449,10 +437,10 @@ const Friends = () => {
                     className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {u.relationStatus === "pending"
-                      ? "Request sent"
+                      ? tr.requestSent
                       : u.relationStatus === "accepted"
-                        ? "Already friends"
-                        : "Add Friend"}
+                        ? tr.alreadyFriends
+                        : tr.addFriend}
                   </button>
                 </div>
               ))}
@@ -465,12 +453,12 @@ const Friends = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl">
             <h2 className="text-base font-semibold text-(--text-primary)">
-              Remove friend?
+              {tr.removeFriend}
             </h2>
             <p className="mt-2 text-sm text-(--text-primary)/60">
               {friendToRemove.username
-                ? `Are you sure you want to remove ${friendToRemove.username} from your friends list?`
-                : "Are you sure you want to remove this user from your friends list?"}
+                ? `${tr.removeFriendDesc} ${friendToRemove.username} ${tr.removeFriendDescEnd}`
+                : `${tr.removeFriendDesc} ${tr.removeFriendDescEnd}`}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -478,14 +466,14 @@ const Friends = () => {
                 disabled={removingFriend}
                 className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-colors disabled:opacity-60"
               >
-                Cancel
+                {tr.cancel}
               </button>
               <button
                 onClick={() => removeFriend()}
                 disabled={removingFriend}
                 className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors disabled:opacity-60"
               >
-                {removingFriend ? "Removing..." : "Remove"}
+                {removingFriend ? tr.removing : tr.remove}
               </button>
             </div>
           </div>

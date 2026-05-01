@@ -1,26 +1,109 @@
 "use client";
-import { useState } from "react";
+import { useLang } from "@/app/context/language";
 import { createClient } from "@/app/lib/supabase/client";
-import type { Post as PostType } from "@/app/types/feed";
+import { t } from "@/app/translation/translation";
+import type { CreatePostProps } from "@/app/types/feed";
+import { useState } from "react";
 
-interface CreatePostProps {
-  onPostCreated?: (post: PostType) => void;
-}
+const MAX_RAW_SIZE_MB = 20;
+const MAX_WIDTH = 1920;
+const MAX_HEIGHT = 1080;
+const QUALITY = 0.8;
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+const validateImage = (file: File): "type" | "size" | null => {
+  if (!ALLOWED_TYPES.includes(file.type)) return "type";
+  if (file.size > MAX_RAW_SIZE_MB * 1024 * 1024) return "size";
+  return null;
+};
+
+const compressImage = (file: File): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+
+      let { width, height } = img;
+
+      if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas context error"));
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("Compression failed"));
+          resolve(
+            new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            }),
+          );
+        },
+        "image/jpeg",
+        QUALITY,
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Image load error"));
+    };
+
+    img.src = url;
+  });
+};
 
 const CreatePost = ({ onPostCreated }: CreatePostProps) => {
+  const { lang } = useLang();
+  const tr = t[lang];
   const [content, setContent] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [compressing, setCompressing] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
   const supabase = createClient();
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    setImage(file);
-    if (file) {
-      setPreview(URL.createObjectURL(file));
-    } else {
-      setPreview(null);
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setImageError(null);
+
+    const error = validateImage(file);
+    if (error === "type") {
+      setImageError(tr.imageTypeError);
+      return;
+    }
+    if (error === "size") {
+      setImageError(tr.imageSizeError(MAX_RAW_SIZE_MB));
+      return;
+    }
+
+    try {
+      setCompressing(true);
+      const compressed = await compressImage(file);
+      if (preview) URL.revokeObjectURL(preview);
+      setImage(compressed);
+      setPreview(URL.createObjectURL(compressed));
+    } catch {
+      setImageError(tr.imageProcessingError);
+    } finally {
+      setCompressing(false);
     }
   };
 
@@ -28,10 +111,10 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
     if (preview) URL.revokeObjectURL(preview);
     setImage(null);
     setPreview(null);
+    setImageError(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
     if (!content.trim() && !image) return;
     setLoading(true);
 
@@ -39,8 +122,7 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
       let imageUrl = null;
 
       if (image) {
-        const fileExt = image.name.split(".").pop();
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
+        const fileName = `${crypto.randomUUID()}.jpg`;
         const { error: uploadError } = await supabase.storage
           .from("posts")
           .upload(fileName, image);
@@ -75,25 +157,40 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!loading && !compressing && (content.trim() || image)) {
+        handleSubmit();
+      }
+    }
+  };
+
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="rounded-xl bg-(--bg-secondary) p-4 space-y-3"
-    >
+    <div className="rounded-xl bg-(--bg-secondary) p-4 space-y-3">
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        placeholder="What's on your mind?"
+        onKeyDown={handleKeyDown}
+        placeholder={tr.whatsOnYourMind}
         rows={3}
         className="w-full bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl p-3 resize-none focus:outline-none text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 transition-colors"
       />
 
-      {preview && (
+      {imageError && <p className="text-xs text-red-400">{imageError}</p>}
+
+      {compressing && (
+        <p className="text-xs text-(--text-primary)/40">
+          {tr.imageCompressing}
+        </p>
+      )}
+
+      {preview && !compressing && (
         <div className="relative">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={preview}
-            alt="Превью"
+            alt="Preview"
             className="w-full rounded-xl object-cover max-h-64"
           />
           <button
@@ -107,7 +204,13 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
       )}
 
       <div className="flex items-center justify-between">
-        <label className="cursor-pointer flex items-center gap-1.5 text-sm text-(--text-primary)/30 hover:text-(--text-primary)/60 transition-colors duration-200">
+        <label
+          className={`cursor-pointer flex items-center gap-1.5 text-sm transition-colors duration-200 ${
+            compressing
+              ? "text-(--text-primary)/20 pointer-events-none"
+              : "text-(--text-primary)/30 hover:text-(--text-primary)/60"
+          }`}
+        >
           <svg
             className="w-5 h-5"
             fill="none"
@@ -121,18 +224,20 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
               d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M14 8h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
             />
           </svg>
-          Photo
+          {tr.photo}
           <input
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,image/gif"
             className="hidden"
             onChange={handleImageChange}
+            disabled={compressing}
           />
         </label>
 
         <button
-          type="submit"
-          disabled={loading || (!content.trim() && !image)}
+          type="button"
+          onClick={handleSubmit}
+          disabled={loading || compressing || (!content.trim() && !image)}
           className="px-5 py-1.5 rounded-xl text-sm font-semibold text-(--text-primary) bg-(--bg-card) hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200"
         >
           {loading ? (
@@ -156,14 +261,14 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
                   d="M4 12a8 8 0 018-8v8z"
                 />
               </svg>
-              Posting...
+              {tr.posting}
             </span>
           ) : (
-            "Post"
+            tr.post
           )}
         </button>
       </div>
-    </form>
+    </div>
   );
 };
 

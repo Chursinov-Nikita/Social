@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { createClient } from "@/app/lib/supabase/client";
 import { useAuth } from "@/app/context/auth";
+import { useLang } from "@/app/context/language";
+import useUnreadNotifications from "@/app/hooks/useUnreadNotification";
+import { createClient } from "@/app/lib/supabase/client";
+import { t } from "@/app/translation/translation";
 import type { Notification } from "@/app/types/notifications";
 import { typeLabel } from "@/app/types/notifications";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import useUnreadNotifications from "@/app/hooks/useUnreadNotification";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const Notifications = () => {
   const { user } = useAuth();
@@ -16,6 +18,8 @@ const Notifications = () => {
   const [actionableRequestIds, setActionableRequestIds] = useState<Set<string>>(
     new Set(),
   );
+  const { lang } = useLang();
+  const tr = t[lang];
 
   const loadNotifications = useCallback(async () => {
     if (!user) return;
@@ -166,7 +170,7 @@ const Notifications = () => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-lg font-semibold text-(--text-primary) flex items-center gap-2">
-              Notifications
+              {tr.notificationsTitle}
               {unreadCount > 0 && (
                 <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">
                   {unreadCount}
@@ -174,7 +178,7 @@ const Notifications = () => {
               )}
             </h1>
             <p className="text-(--text-primary)/40 text-sm mt-0.5">
-              Your activity
+              {tr.yourActivity}
             </p>
           </div>
           {unreadCount > 0 && (
@@ -182,7 +186,7 @@ const Notifications = () => {
               onClick={markAllRead}
               className="text-xs text-(--text-primary)/40 hover:text-(--text-primary) transition-colors"
             >
-              Mark all as read
+              {tr.markAllAsRead}
             </button>
           )}
         </div>
@@ -193,7 +197,7 @@ const Notifications = () => {
           </div>
         ) : notifications.length === 0 ? (
           <div className="text-center py-12 text-(--text-primary)/20 text-sm">
-            No notifications yet
+            {tr.noNotificationsYet}
           </div>
         ) : (
           <div className="space-y-2">
@@ -216,7 +220,7 @@ const Notifications = () => {
                   <p className="text-sm text-(--text-primary) truncate">
                     <span className="font-medium">{n.sender?.username}</span>{" "}
                     <span className="text-(--text-primary)/50">
-                      {typeLabel(n.type)}
+                      {typeLabel(n.type, tr)}
                     </span>
                   </p>
                   <p className="text-xs text-(--text-primary)/30 mt-0.5">
@@ -234,7 +238,7 @@ const Notifications = () => {
                           disabled={actionLoadingId === n.id}
                           className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          Accept
+                          {tr.accept}
                         </button>
                         <button
                           onClick={(e) => {
@@ -244,7 +248,7 @@ const Notifications = () => {
                           disabled={actionLoadingId === n.id}
                           className="text-xs text-(--text-primary)/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                         >
-                          Decline
+                          {tr.decline}
                         </button>
                       </div>
                     )}

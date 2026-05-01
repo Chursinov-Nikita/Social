@@ -3,10 +3,12 @@
 import { useAuth } from "@/app/context/auth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { links } from "./links";
+import { getLinks } from "./links";
 import useUnreadMessages from "@/app/hooks/useUnreadMessages";
 import useUnreadNotifications from "@/app/hooks/useUnreadNotification";
 import useTheme from "@/app/hooks/useTheme";
+import { useLang } from "@/app/context/language";
+import { t } from "@/app/translation/translation";
 
 const Header = () => {
   const { user } = useAuth();
@@ -14,6 +16,9 @@ const Header = () => {
   const countUnreadMessages = useUnreadMessages();
   const countUnreadNotifications = useUnreadNotifications();
   const { toggle, theme } = useTheme();
+  const { lang, toggle: toggleLang } = useLang();
+  const tr = t[lang];
+  const links = getLinks(tr);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-(--bg-secondary) border-b border-(--border) h-14">
@@ -62,6 +67,13 @@ const Header = () => {
         {/* Правая часть */}
         <div className="flex items-center gap-2">
           <button
+            onClick={toggleLang}
+            className="w-8 h-8 rounded-xl flex items-center justify-center text-(--text-primary)/40 hover:text-(--text-primary) hover:bg-(--bg-card) transition-all duration-200 text-xs font-bold tracking-wider"
+          >
+            {lang === "en" ? "RU" : "EN"}
+          </button>
+
+          <button
             onClick={toggle}
             className="w-8 h-8 rounded-xl flex items-center justify-center text-(--text-primary)/40 hover:text-(--text-primary) hover:bg-(--bg-card) transition-all duration-200"
           >
@@ -81,7 +93,7 @@ const Header = () => {
               href="/components/login"
               className="px-4 py-1.5 rounded-xl text-sm font-bold text-(--text-primary) bg-(--bg-card) hover:opacity-80 transition-all duration-200"
             >
-              Sign In
+              {tr.signIn}
             </Link>
           ) : (
             <Link
@@ -91,7 +103,7 @@ const Header = () => {
               <div className="w-6 h-6 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary)">
                 {user.email?.[0].toUpperCase()}
               </div>
-              {user.user_metadata?.name ?? "Profile"}
+              {user.user_metadata?.name ?? tr.profile}
             </Link>
           )}
         </div>

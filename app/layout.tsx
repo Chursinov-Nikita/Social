@@ -3,6 +3,7 @@ import { Nunito } from "next/font/google";
 import "./globals.css";
 import Header from "./components/header/page";
 import { AuthProvider } from "./context/auth";
+import { LanguageProvider } from "./context/language";
 
 const nunito = Nunito({
   subsets: ["latin", "cyrillic"],
@@ -11,7 +12,7 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Social",
+  title: "NEBL",
   description: "Speaking with everyone",
 };
 
@@ -24,8 +25,10 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${nunito.className} antialiased`}>
         <AuthProvider>
-          <Header />
-          <main className="pt-15 bg-(--bg-primary) ">{children}</main>
+          <LanguageProvider>
+            <Header />
+            <main className="pt-15 bg-(--bg-primary) ">{children}</main>
+          </LanguageProvider>
         </AuthProvider>
       </body>
     </html>

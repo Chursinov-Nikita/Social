@@ -1,6 +1,6 @@
-import { createClient } from "./lib/supabase/server";
-import Feed from "./components/feed/page";
 import type { Post as PostType } from "@/app/types/feed";
+import Feed from "./components/feed/page";
+import { createClient } from "./lib/supabase/server";
 
 const PAGE_SIZE = 10;
 

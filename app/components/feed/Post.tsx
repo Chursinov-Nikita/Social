@@ -1,20 +1,29 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import Image from "next/image";
+import { useLang } from "@/app/context/language";
+import { createClient } from "@/app/lib/supabase/client";
+import { t } from "@/app/translation/translation";
+import type { Comment, PostProps } from "@/app/types/feed";
 import {
-  HeartIcon,
   ChatBubbleLeftIcon,
+  HeartIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import { createClient } from "@/app/lib/supabase/client";
-import type { Comment, PostProps } from "@/app/types/feed";
+import Image from "next/image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const commentsCache = new Map<string, Comment[]>();
 
-const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
+const Post = ({
+  post,
+  currentUserId,
+  initialLiked,
+  onLikeChange,
+}: PostProps & { onLikeChange?: (delta: number) => void }) => {
   const supabase = useMemo(() => createClient(), []);
+  const { lang } = useLang();
+  const tr = t[lang];
   const [liked, setLiked] = useState<boolean>(initialLiked);
   const [likesCount, setLikesCount] = useState<number>(post.likes_count ?? 0);
   const [showComments, setShowComments] = useState(false);
@@ -26,6 +35,11 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
   const [isLiking, setIsLiking] = useState(false);
   const [commentToDelete, setCommentToDelete] = useState<string | null>(null);
   const lastPostIdRef = useRef(post.id);
+  const pendingOwnLike = useRef(false);
+  const currentUserIdRef = useRef(currentUserId);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   useEffect(() => {
     setLiked(initialLiked);
@@ -73,6 +87,7 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
     loadComments();
   }, [loadComments]);
 
+  // Realtime — комментарии
   useEffect(() => {
     if (!showComments) return;
     const channel = supabase
@@ -130,16 +145,79 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
     };
   }, [post.id, showComments, supabase]);
 
+  // Realtime — лайки от других пользователей
+  useEffect(() => {
+    const channel = supabase
+      .channel(`likes-${post.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "likes",
+          filter: `post_id=eq.${post.id}`,
+        },
+        (
+          payload: RealtimePostgresChangesPayload<{
+            user_id: string;
+            post_id: string;
+          }>,
+        ) => {
+          const newLike = payload.new as { user_id: string };
+          // Используем реф вместо замыкания — всегда актуальный currentUserId
+          if (
+            newLike.user_id === currentUserIdRef.current ||
+            pendingOwnLike.current
+          )
+            return;
+          setLikesCount((prev) => prev + 1);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "likes",
+          filter: `post_id=eq.${post.id}`,
+        },
+        (
+          payload: RealtimePostgresChangesPayload<{
+            user_id: string;
+            post_id: string;
+          }>,
+        ) => {
+          const oldLike = payload.old as { user_id?: string };
+          if (
+            oldLike.user_id === currentUserIdRef.current ||
+            pendingOwnLike.current
+          )
+            return;
+          setLikesCount((prev) => Math.max(prev - 1, 0));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // Убрали currentUserId из deps — используем реф, канал не пересоздаётся
+  }, [post.id, supabase]);
+
   const handleLike = async () => {
     if (!currentUserId || isLiking) return;
     setIsLiking(true);
+    pendingOwnLike.current = true;
+
     const previousLiked = liked;
     const previousCount = likesCount;
     const newLiked = !liked;
+
     setLiked(newLiked);
     setLikesCount(
       newLiked ? previousCount + 1 : Math.max(previousCount - 1, 0),
     );
+
     try {
       if (newLiked) {
         const { error } = await supabase
@@ -151,6 +229,8 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
         if (error) {
           setLiked(previousLiked);
           setLikesCount(previousCount);
+        } else {
+          onLikeChange?.(1);
         }
       } else {
         const { error } = await supabase
@@ -161,10 +241,15 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
         if (error) {
           setLiked(previousLiked);
           setLikesCount(previousCount);
+        } else {
+          onLikeChange?.(-1);
         }
       }
     } finally {
       setIsLiking(false);
+      setTimeout(() => {
+        pendingOwnLike.current = false;
+      }, 500);
     }
   };
 
@@ -281,19 +366,27 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
           <button
             onClick={handleLike}
             disabled={!currentUserId}
-            className={`flex items-center space-x-1.5 text-sm transition-all duration-200 disabled:opacity-30 ${liked ? "text-red-400" : "text-(--text-primary)/30 hover:text-red-400"}`}
+            className={`flex items-center space-x-1.5 text-sm transition-all duration-200 disabled:opacity-30 ${
+              liked
+                ? "text-red-400"
+                : "text-(--text-primary)/30 hover:text-red-400"
+            }`}
           >
             {liked ? (
               <HeartSolidIcon className="w-5 h-5" />
             ) : (
               <HeartIcon className="w-5 h-5" />
             )}
-            <span>{likesCount}</span>
+            <span suppressHydrationWarning>{likesCount}</span>
           </button>
 
           <button
             onClick={() => setShowComments((prev) => !prev)}
-            className={`flex items-center space-x-1.5 text-sm transition-colors duration-200 ${showComments ? "text-(--text-primary)/60" : "text-(--text-primary)/30 hover:text-(--text-primary)/60"}`}
+            className={`flex items-center space-x-1.5 text-sm transition-colors duration-200 ${
+              showComments
+                ? "text-(--text-primary)/60"
+                : "text-(--text-primary)/30 hover:text-(--text-primary)/60"
+            }`}
           >
             <ChatBubbleLeftIcon className="w-5 h-5" />
             <span suppressHydrationWarning>{commentsCount}</span>
@@ -306,11 +399,11 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
             <div className="space-y-3 max-h-48 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]">
               {loadingComments ? (
                 <p className="text-xs text-(--text-primary)/20 text-center py-2">
-                  Loading comments...
+                  {tr.loadingComments}
                 </p>
               ) : comments.length === 0 ? (
                 <p className="text-xs text-(--text-primary)/20 text-center py-2">
-                  No comments yet
+                  {tr.noCommentsYet}
                 </p>
               ) : (
                 comments.map((comment) => (
@@ -346,7 +439,7 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleComment()}
-                  placeholder="Write a comment..."
+                  placeholder={tr.writeComment}
                   className="flex-1 bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl px-3 py-2 text-xs text-(--text-primary) placeholder:text-(--text-primary)/20 outline-none transition-colors"
                 />
                 <button
@@ -354,7 +447,7 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
                   disabled={loadingComment || !commentText.trim()}
                   className="px-3 py-2 rounded-xl bg-(--bg-card) hover:opacity-80 text-xs text-(--text-primary) disabled:opacity-30 transition-colors"
                 >
-                  Send
+                  {tr.send}
                 </button>
               </div>
             )}
@@ -366,24 +459,23 @@ const Post = ({ post, currentUserId, initialLiked }: PostProps) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl">
             <h2 className="text-base font-semibold text-(--text-primary)">
-              Delete comment?
+              {tr.deleteComment}
             </h2>
             <p className="mt-2 text-sm text-(--text-primary)/60">
-              Are you sure you want to delete this comment? This action cannot
-              be undone.
+              {tr.deleteCommentDesc}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setCommentToDelete(null)}
                 className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-colors"
               >
-                Cancel
+                {tr.cancel}
               </button>
               <button
                 onClick={confirmDeleteComment}
                 className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors"
               >
-                Delete
+                {tr.delete}
               </button>
             </div>
           </div>

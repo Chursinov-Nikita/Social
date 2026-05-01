@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
+import { useLang } from "@/app/context/language";
+import { t } from "@/app/translation/translation";
 
 const Register = () => {
   const [name, setName] = useState<string>("");
@@ -12,6 +14,8 @@ const Register = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const { lang } = useLang();
+  const tr = t[lang];
 
   const supabase = createClient();
 
@@ -19,11 +23,11 @@ const Register = () => {
     e.preventDefault();
     setError(null);
     if (password !== twicePassword) {
-      setError("Passwords don't match");
+      setError(tr.passwordsDoNotMatch);
       return;
     }
     if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+      setError(tr.passwordLeast);
       return;
     }
 
@@ -47,10 +51,10 @@ const Register = () => {
         <div className="rounded-2xl bg-(--bg-secondary) p-8 text-center max-w-sm">
           <div className="text-4xl mb-4">📬</div>
           <h2 className="font-semibold text-base mb-2 text-(--text-primary)">
-            Check your email
+            {tr.checkEmail}
           </h2>
           <p className="text-(--text-primary)/40 text-sm">
-            We sent a confirmation link to{" "}
+            {tr.checkEmailDesc}{" "}
             <span className="text-(--text-primary)/70">{email}</span>
           </p>
         </div>
@@ -63,13 +67,12 @@ const Register = () => {
       {/* Left panel */}
       <aside className="hidden lg:flex w-1/2 flex-col justify-center px-16">
         <h1 className="text-6xl font-black leading-tight mb-4">
-          Your world,
+          {tr.yourWorld}
           <br />
-          <span className="text-(--text-primary)/40">your rules.</span>
+          <span className="text-(--text-primary)/40">{tr.yourRules}</span>
         </h1>
         <p className="text-sm text-(--text-primary)/20 max-w-xs leading-relaxed">
-          Chat, share, and discover new things with millions of people around
-          the world.
+          {tr.authDesc}
         </p>
       </aside>
 
@@ -78,28 +81,28 @@ const Register = () => {
         <div className="w-full max-w-sm">
           <div className="rounded-2xl bg-(--bg-secondary) p-6 mb-4">
             <h2 className="text-base font-semibold mb-5 text-(--text-primary)">
-              Create account
+              {tr.createAccount}
             </h2>
             <form onSubmit={handleRegister} className="space-y-3">
               {error && <p className="text-red-400 text-xs">{error}</p>}
 
               {[
                 {
-                  label: "Name",
+                  label: tr.name,
                   type: "text",
                   value: name,
                   onChange: setName,
-                  placeholder: "your name",
+                  placeholder: tr.name2,
                 },
                 {
-                  label: "Email",
+                  label: tr.email,
                   type: "email",
                   value: email,
                   onChange: setEmail,
                   placeholder: "you@example.com",
                 },
                 {
-                  label: "Password",
+                  label: tr.password,
                   type: "password",
                   value: password,
                   onChange: setPassword,
@@ -123,7 +126,7 @@ const Register = () => {
 
               <div>
                 <label className="block text-[11px] font-medium text-(--text-primary)/40 uppercase tracking-widest mb-1.5">
-                  Confirm password
+                  {tr.confirmPassword}
                 </label>
                 <input
                   type="password"
@@ -136,7 +139,7 @@ const Register = () => {
                 />
                 {twicePassword && password !== twicePassword && (
                   <p className="text-red-400 text-[11px] mt-1">
-                    Passwords don&apos;t match
+                    {tr.passwordsDoNotMatch}
                   </p>
                 )}
               </div>
@@ -146,13 +149,15 @@ const Register = () => {
                 disabled={loading}
                 className="w-full rounded-xl bg-(--bg-card) hover:opacity-80 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-1"
               >
-                {loading ? "Creating..." : "Create Account"}
+                {loading ? tr.creating : tr.createAccount}
               </button>
             </form>
 
             <div className="my-4 flex items-center gap-3">
               <div className="h-px flex-1 bg-(--border)" />
-              <span className="text-[11px] text-(--text-primary)/20">or</span>
+              <span className="text-[11px] text-(--text-primary)/20">
+                {tr.or}
+              </span>
               <div className="h-px flex-1 bg-(--border)" />
             </div>
 
@@ -203,12 +208,12 @@ const Register = () => {
           </div>
 
           <p className="text-center text-xs text-(--text-primary)/30">
-            Have account?{" "}
+            {tr.haveAccount}{" "}
             <Link
               href="/components/login"
               className="font-semibold text-(--text-primary)/60 hover:text-(--text-primary) transition-colors"
             >
-              Sign In
+              {tr.signIn}
             </Link>
           </p>
         </div>

@@ -4,6 +4,8 @@ import { Message, ChatWindowProps } from "@/app/types/chat";
 import { useAuth } from "@/app/context/auth";
 import { createClient } from "@/app/lib/supabase/client";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { useLang } from "@/app/context/language";
+import { t } from "@/app/translation/translation";
 
 const getChatCacheKey = (currentUserId: string, recipientId: string) => {
   const [first, second] = [currentUserId, recipientId].sort();
@@ -23,6 +25,8 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
   const { user } = useAuth();
   const supabase = React.useMemo(() => createClient(), []);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const { lang } = useLang();
+  const tr = t[lang];
 
   const cachedMessages = React.useMemo(() => {
     if (!user) return [] as Message[];
@@ -183,7 +187,7 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
           <p className="text-sm font-semibold text-(--text-primary)">
             {recipient.username}
           </p>
-          <p className="text-xs text-(--text-primary)/30">online</p>
+          <p className="text-xs text-(--text-primary)/30">{tr.online}</p>
         </div>
       </div>
 
@@ -198,7 +202,7 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
               disabled={loadingOlder}
               className="text-xs px-3 py-1.5 rounded-full bg-(--bg-secondary) text-(--text-primary)/80 hover:bg-(--bg-card) disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {loadingOlder ? "Loading..." : "Load older messages"}
+              {loadingOlder ? tr.loading : tr.loadOlderMessages}
             </button>
           </div>
         )}
@@ -232,7 +236,7 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
             value={content}
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Write a message..."
+            placeholder={tr.writeMessage}
             rows={1}
             className="flex-1 bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl px-4 py-2.5 text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 resize-none focus:outline-none transition-colors"
           />

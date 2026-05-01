@@ -18,16 +18,24 @@ export interface Notification {
   };
 }
 
-export const typeLabel = (type: string) => {
+export const typeLabel = (
+  type: string,
+  tr: {
+    notifLike: string;
+    notifComment: string;
+    notifFriendRequest: string;
+    notifFriendAccepted: string;
+  },
+) => {
   switch (type) {
     case "like":
-      return "liked your post";
+      return tr.notifLike;
     case "comment":
-      return "commented on your post";
+      return tr.notifComment;
     case "friend_request":
-      return "sent you a friend request";
+      return tr.notifFriendRequest;
     case "friend_accepted":
-      return "accepted your friend request";
+      return tr.notifFriendAccepted;
     default:
       return "";
   }

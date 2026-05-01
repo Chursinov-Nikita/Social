@@ -1,43 +1,42 @@
-export const features = [
+import { t } from "@/app/translation/translation";
+
+export const getFeatures = (tr: typeof t.en) => [
   {
     icon: "💬",
-    title: "Real-time Chat",
-    description:
-      "Instant messaging with friends and groups, with read receipts and media sharing.",
+    title: tr.featureChat,
+    description: tr.featureChatDesc,
   },
   {
     icon: "📸",
-    title: "Photo Sharing",
-    description:
-      "Post and discover amazing photos from people around the world.",
+    title: tr.featurePhoto,
+    description: tr.featurePhotoDesc,
   },
   {
     icon: "🔒",
-    title: "Privacy First",
-    description:
-      "Your data is encrypted and you control who sees your content.",
+    title: tr.featurePrivacy,
+    description: tr.featurePrivacyDesc,
   },
 ];
 
-export const values = [
+export const getValues = (tr: typeof t.en) => [
   {
     icon: "🤝",
-    title: "Respect",
-    description: "We foster a respectful environment for everyone.",
+    title: tr.valueRespect,
+    description: tr.valueRespectDesc,
   },
   {
     icon: "💡",
-    title: "Innovation",
-    description: "Constantly improving with new features and ideas.",
+    title: tr.valueInnovation,
+    description: tr.valueInnovationDesc,
   },
   {
     icon: "🌍",
-    title: "Inclusivity",
-    description: "A platform for all cultures, languages, and backgrounds.",
+    title: tr.valueInclusivity,
+    description: tr.valueInclusivityDesc,
   },
   {
     icon: "⚡",
-    title: "Simplicity",
-    description: "Easy to use, intuitive design for all ages.",
+    title: tr.valueSimplicity,
+    description: tr.valueSimplicityDesc,
   },
 ];

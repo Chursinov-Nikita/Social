@@ -1,156 +1,94 @@
 "use client";
-import { useState, useRef } from "react";
-import { createClient } from "@/app/lib/supabase/client";
+
 import { useAuth } from "@/app/context/auth";
-import type { Video } from "@/app/types/reels";
+import { useLang } from "@/app/context/language";
+import { createClient } from "@/app/lib/supabase/client";
+import { t } from "@/app/translation/translation";
+import { PlusCircleIcon } from "lucide-react";
+import { useRef, useState } from "react";
 
-interface CreateReelProps {
-  onReelCreated: (video: Video) => void;
-}
-
-const CreateReel = ({ onReelCreated }: CreateReelProps) => {
-  const { user } = useAuth();
-  const supabase = createClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+const CreateReel = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoPreview, setVideoPreview] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { lang } = useLang();
+  const tr = t[lang];
+  const { user } = useAuth();
+  const supabase = createClient();
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith("video/")) {
-      setError("Only video files are allowed.");
-      return;
-    }
-
-    if (file.size > 50 * 1024 * 1024) {
-      setError("File size must be under 50MB.");
-      return;
-    }
-
-    setError(null);
-    setVideoFile(file);
-    setVideoPreview(URL.createObjectURL(file));
-  };
-
-  const handleUpload = async () => {
-    if (!videoFile || !user) return;
-    setUploading(true);
-    setError(null);
-
+  const handleUploadVideo = async () => {
+    if (!user || !file) return;
+    setLoading(true);
     try {
-      // 1. загрузить видео в storage
-      const fileName = `${user.id}/${crypto.randomUUID()}.mp4`;
-      const { error: storageError } = await supabase.storage
+      console.log("1. Начало загрузки", file.name, file.size, file.type);
+
+      const fileName = `${user?.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`;
+      console.log("2. Имя файла:", fileName);
+
+      const { error } = await supabase.storage
         .from("videos")
-        .upload(fileName, videoFile, { contentType: videoFile.type });
+        .upload(fileName, file, { contentType: file.type, upsert: true });
 
-      if (storageError) throw storageError;
+      console.log("3. Storage результат:", error ?? "успех");
+      if (error) throw new Error(error.message);
 
-      // 2. получить публичный URL
       const {
         data: { publicUrl },
       } = supabase.storage.from("videos").getPublicUrl(fileName);
+      console.log("4. Public URL:", publicUrl);
 
-      // 3. сохранить в БД
-      const { data: savedVideo, error: dbError } = await supabase
-        .from("videos")
-        .insert({
-          user_id: user.id,
-          title: title.trim() || null,
-          description: description.trim() || null,
-          video_url: publicUrl,
-        })
-        .select(
-          "id, user_id, title, description, video_url, thumbnail_url, views_count, created_at",
-        )
-        .single();
+      const { error: dbError } = await supabase.from("videos").insert({
+        user_id: user.id,
+        video_url: publicUrl,
+        title: title,
+        description: description,
+      });
 
-      if (dbError) throw dbError;
+      console.log("5. DB результат:", dbError ?? "успех");
+      if (dbError) throw new Error(dbError.message);
 
-      // 4. получить профиль отдельно
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("username, avatar_url")
-        .eq("id", user.id)
-        .single();
-
-      const videoWithProfile: Video = {
-        ...savedVideo,
-        profiles: profile ?? {
-          username: user.email?.split("@")[0] ?? "Аноним",
-          avatar_url: null,
-        },
-        video_likes: [],
-      };
-
-      onReelCreated(videoWithProfile);
+      console.log("6. Всё готово");
+      setIsOpen(false);
+      setFile(null);
+      setPreview(null);
       setTitle("");
       setDescription("");
-      setVideoFile(null);
-      setVideoPreview(null);
-      setIsOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      console.error("Ошибка:", err);
     } finally {
-      setUploading(false);
+      setLoading(false);
     }
   };
 
-  const handleClose = () => {
-    if (uploading) return;
-    setIsOpen(false);
-    setTitle("");
-    setDescription("");
-    setVideoFile(null);
-    setVideoPreview(null);
-    setError(null);
-  };
-
-  if (!user) return null;
-
   return (
-    <>
-      <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full bg-white flex items-center justify-center shadow-lg hover:bg-white/90 transition-colors"
-      >
-        <svg
-          className="w-6 h-6 text-black"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
-      </button>
+    <div>
+      <div className="fixed bottom-10 right-10">
+        <PlusCircleIcon
+          onClick={() => setIsOpen(true)}
+          className="w-11 h-11 text-(--text-primary) cursor-pointer hover:opacity-70 transition-opacity"
+        />
+      </div>
 
       {isOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
-          onClick={handleClose}
+          onClick={() => setIsOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#2c2c2e] p-5 space-y-4"
+            className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-white">New reel</p>
+              <p className="text-sm font-semibold text-(--text-primary)">
+                {tr.newReel}
+              </p>
               <button
-                onClick={handleClose}
-                disabled={uploading}
-                className="text-white/40 hover:text-white transition-colors disabled:opacity-30"
+                onClick={() => setIsOpen(false)}
+                className="text-(--text-primary)/40 hover:text-(--text-primary) transition-colors"
               >
                 <svg
                   className="w-5 h-5"
@@ -168,103 +106,63 @@ const CreateReel = ({ onReelCreated }: CreateReelProps) => {
               </button>
             </div>
 
-            {/* превью видео */}
-            {videoPreview ? (
-              <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-black">
-                <video
-                  src={videoPreview}
-                  className="w-full h-full object-cover"
-                  controls
-                  muted
-                />
-                <button
-                  onClick={() => {
-                    setVideoFile(null);
-                    setVideoPreview(null);
-                  }}
-                  className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 flex items-center justify-center text-white hover:bg-black/80 transition-colors"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
-                </button>
-              </div>
-            ) : (
+            {preview && (
+              <video
+                src={preview}
+                controls
+                muted
+                className="w-full h-64 rounded-xl"
+              />
+            )}
+
+            {!preview && (
               <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full aspect-video rounded-xl border border-dashed border-white/10 bg-[#1c1c1e] flex flex-col items-center justify-center gap-2 hover:border-white/20 transition-colors"
+                onClick={() => inputRef.current?.click()}
+                className="w-full aspect-video rounded-xl border border-dashed border-(--border) bg-(--bg-primary) flex items-center justify-center text-xs text-(--text-primary)/30"
               >
-                <svg
-                  className="w-8 h-8 text-white/20"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.361a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"
-                  />
-                </svg>
-                <span className="text-xs text-white/30">
-                  Click to select video
-                </span>
-                <span className="text-[10px] text-white/20">
-                  MP4, MOV up to 50MB
-                </span>
+                {tr.clickToSelectVideo}
               </button>
             )}
 
             <input
-              ref={fileInputRef}
+              ref={inputRef}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setFile(f);
+                if (f) setPreview(URL.createObjectURL(f));
+              }}
               type="file"
               accept="video/*"
-              onChange={handleFileChange}
               className="hidden"
             />
 
             <input
               type="text"
-              value={title}
+              value={title ?? ""}
               onChange={(e) => setTitle(e.target.value)}
-              maxLength={100}
-              placeholder="Title (optional)"
-              className="w-full rounded-xl border border-white/5 focus:border-white/20 bg-[#1c1c1e] px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none transition-colors"
+              placeholder={tr.titleOptional}
+              className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none transition-colors"
             />
 
-            <textarea
-              value={description}
+            <input
+              type="text"
+              value={description ?? ""}
               onChange={(e) => setDescription(e.target.value)}
-              maxLength={300}
-              placeholder="Description (optional)"
-              rows={2}
-              className="w-full rounded-xl border border-white/5 focus:border-white/20 bg-[#1c1c1e] px-3 py-2 text-sm text-white placeholder:text-white/25 outline-none resize-none transition-colors"
+              placeholder={tr.descriptionOptional}
+              className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none transition-colors"
             />
-
-            {error && <p className="text-xs text-red-300">{error}</p>}
 
             <button
-              onClick={handleUpload}
-              disabled={!videoFile || uploading}
-              className="w-full py-2.5 rounded-xl bg-white text-black text-xs font-semibold uppercase tracking-wider hover:bg-white/90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              onClick={handleUploadVideo}
+              disabled={loading}
+              className="w-full py-2.5 rounded-xl bg-(--bg-card) text-(--text-primary) text-xs font-semibold uppercase tracking-wider hover:opacity-80 transition-colors"
             >
-              {uploading ? "Uploading..." : "Post reel"}
+              {loading ? tr.loading : tr.postReel}
             </button>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

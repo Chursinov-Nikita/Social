@@ -1,10 +1,10 @@
-export type Video = {
+export interface Video {
   id: string;
   user_id: string;
-  title: string | null;
-  description: string | null;
+  title: string;
+  description: string;
   video_url: string;
-  thumbnail_url: string | null;
+  thumbnail_url: string;
   views_count: number;
   created_at: string;
   profiles: {
@@ -12,4 +12,10 @@ export type Video = {
     avatar_url: string | null;
   } | null;
   video_likes: { user_id: string }[];
-};
+}
+
+export interface PostReelsProps {
+  video: Video;
+  currentUserId: string | null;
+  initialLiked: boolean;
+}

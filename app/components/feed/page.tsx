@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useAuth } from "@/app/context/auth";
+import { useLang } from "@/app/context/language";
 import { createClient } from "@/app/lib/supabase/client";
-import Post from "./Post";
-import CreatePost from "./CreatePost";
+import { t } from "@/app/translation/translation";
 import type { Post as PostType } from "@/app/types/feed";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import { useAuth } from "@/app/context/auth";
+import { useEffect, useMemo, useState } from "react";
+import CreatePost from "./CreatePost";
+import Post from "./Post";
 
 const PAGE_SIZE = 10;
 const FEED_CACHE_KEY = "feed-cache-v1";
@@ -47,6 +49,8 @@ const Feed = ({ initialPosts }: { initialPosts: PostType[] }) => {
   const [page, setPage] = useState(initialFeedState.page);
   const [hasMore, setHasMore] = useState(initialFeedState.hasMore);
   const { user } = useAuth();
+  const { lang } = useLang();
+  const tr = t[lang];
   const currentUserId = user?.id ?? null;
   const supabase = useMemo(() => createClient(), []);
 
@@ -114,9 +118,11 @@ const Feed = ({ initialPosts }: { initialPosts: PostType[] }) => {
     <div className="min-h-screen bg-(--bg-primary)">
       <div className="max-w-2xl mx-auto px-4 py-8 space-y-3">
         <div className="mb-4">
-          <h1 className="text-lg font-semibold text-(--text-primary)">Feed</h1>
+          <h1 className="text-lg font-semibold text-(--text-primary)">
+            {tr.feed}
+          </h1>
           <p className="text-(--text-primary)/40 text-sm mt-0.5">
-            What&apos;s happening right now
+            {tr.feedSubtitle}
           </p>
         </div>
 
@@ -134,6 +140,24 @@ const Feed = ({ initialPosts }: { initialPosts: PostType[] }) => {
                 (l: { user_id: string }) => l.user_id === currentUserId,
               ) ?? false
             }
+            onLikeChange={(delta) => {
+              setPosts((prev) =>
+                prev.map((p) => {
+                  if (p.id !== post.id) return p;
+                  const liked = delta > 0;
+                  const updatedLikes = liked
+                    ? [...(p.likes ?? []), { user_id: currentUserId! }]
+                    : (p.likes ?? []).filter(
+                        (l) => l.user_id !== currentUserId,
+                      );
+                  return {
+                    ...p,
+                    likes_count: Math.max((p.likes_count ?? 0) + delta, 0),
+                    likes: updatedLikes,
+                  };
+                }),
+              );
+            }}
           />
         ))}
 
@@ -163,12 +187,12 @@ const Feed = ({ initialPosts }: { initialPosts: PostType[] }) => {
                   d="M4 12a8 8 0 018-8v8z"
                 />
               </svg>
-              Loading...
+              {tr.loadingDots}
             </span>
           ) : !hasMore ? (
-            "No more posts"
+            tr.noMorePosts
           ) : (
-            "Load more"
+            tr.loadMore
           )}
         </button>
       </div>

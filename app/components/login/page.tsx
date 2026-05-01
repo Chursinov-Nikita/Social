@@ -4,12 +4,16 @@ import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/app/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { useLang } from "@/app/context/language";
+import { t } from "@/app/translation/translation";
 
 const Login = () => {
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const { lang } = useLang();
+  const tr = t[lang];
 
   const supabase = createClient();
   const router = useRouter();
@@ -34,13 +38,12 @@ const Login = () => {
       {/* Left panel */}
       <aside className="hidden lg:flex w-1/2 flex-col justify-center px-16">
         <h1 className="text-6xl font-black leading-tight mb-4">
-          Your world,
+          {tr.yourWorld}
           <br />
-          <span className="text-(--text-primary)/40">your rules.</span>
+          <span className="text-(--text-primary)/40">{tr.yourRules}</span>
         </h1>
         <p className="text-sm text-(--text-primary)/20 max-w-xs leading-relaxed">
-          Chat, share, and discover new things with millions of people around
-          the world.
+          {tr.authDesc}
         </p>
       </aside>
 
@@ -49,14 +52,14 @@ const Login = () => {
         <div className="w-full max-w-sm">
           <div className="rounded-2xl bg-(--bg-secondary) p-6 mb-4">
             <h2 className="text-base font-semibold mb-5 text-(--text-primary)">
-              Sign In
+              {tr.signIn}
             </h2>
             <form onSubmit={handleLogin} className="space-y-3">
               {error && <p className="text-red-400 text-xs">{error}</p>}
 
               <div>
                 <label className="block text-[11px] font-medium text-(--text-primary)/40 uppercase tracking-widest mb-1.5">
-                  Email
+                  {tr.email}
                 </label>
                 <input
                   type="email"
@@ -70,13 +73,13 @@ const Login = () => {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[11px] font-medium text-(--text-primary)/40 uppercase tracking-widest">
-                    Password
+                    {tr.password}
                   </label>
                   <a
                     href="#"
                     className="font-semibold text-[11px] text-(--text-primary)/40 hover:text-(--text-primary) transition-colors pr-1"
                   >
-                    Forgot?
+                    {tr.forgot}
                   </a>
                 </div>
                 <input
@@ -93,13 +96,15 @@ const Login = () => {
                 disabled={loading}
                 className="w-full rounded-xl bg-(--bg-card) hover:opacity-80 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-1"
               >
-                {loading ? "Loading..." : "Sign In"}
+                {loading ? tr.loading : tr.signIn}
               </button>
             </form>
 
             <div className="my-4 flex items-center gap-3">
               <div className="h-px flex-1 bg-(--border)" />
-              <span className="text-[11px] text-(--text-primary)/20">or</span>
+              <span className="text-[11px] text-(--text-primary)/20">
+                {tr.or}
+              </span>
               <div className="h-px flex-1 bg-(--border)" />
             </div>
 
@@ -150,12 +155,12 @@ const Login = () => {
           </div>
 
           <p className="text-center text-xs text-(--text-primary)/30">
-            No account?{" "}
+            {tr.noAccount}{" "}
             <Link
               href="/components/register"
               className="font-semibold text-(--text-primary)/60 hover:text-(--text-primary) transition-colors"
             >
-              Register
+              {tr.register}
             </Link>
           </p>
         </div>

@@ -32,3 +32,18 @@ export interface UserListProps {
 export interface ChatWindowProps {
   recipient: ChatUser;
 }
+
+export type ChatFolderMember = {
+  companion_id: string; // id собеседника (UUID)
+};
+
+export type Folder = {
+  name: string;
+  id: string; // UUID папки
+  user_id: string; // id владельца
+  title: string; // название папки
+  position: number; // порядок сортировки
+  chat_folder_members: ChatFolderMember[]; // вложенная связь
+};
+
+export const tabs = ["All", "Friends", "Work"];

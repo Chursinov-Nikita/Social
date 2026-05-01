@@ -4,9 +4,13 @@ import { useState } from "react";
 import { ChatUser } from "@/app/types/chat";
 import UserList from "@/app/components/chat/UserList";
 import ChatWindow from "@/app/components/chat/ChatWindow";
+import { useLang } from "@/app/context/language";
+import { t } from "@/app/translation/translation";
 
 const Chat = () => {
   const [selectedUser, setSelectedUser] = useState<ChatUser | null>(null);
+  const { lang } = useLang();
+  const tr = t[lang];
 
   return (
     <div className="min-h-screen bg-(--bg-primary) text-(--text-primary)">
@@ -20,7 +24,7 @@ const Chat = () => {
               <ChatWindow key={selectedUser.id} recipient={selectedUser} />
             ) : (
               <div className="h-full flex items-center justify-center text-(--text-primary)/20 text-sm">
-                Select a user to start chatting
+                {tr.selectUserToChat}
               </div>
             )}
           </div>

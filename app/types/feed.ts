@@ -32,3 +32,7 @@ export interface PostProps {
   currentUserId: string | null;
   initialLiked: boolean;
 }
+
+export interface CreatePostProps {
+  onPostCreated?: (post: Post) => void;
+}
