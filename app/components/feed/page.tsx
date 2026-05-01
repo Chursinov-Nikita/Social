@@ -18,11 +18,12 @@ const mergeUniquePosts = (current: PostType[], incoming: PostType[]) => {
   return [...current, ...incoming.filter((post) => !seenIds.has(post.id))];
 };
 
-const getInitialFeedState = (initialPosts: PostType[]) => {
+const getInitialFeedState = (initialPosts: PostType[] = []) => {
+  const safePosts = initialPosts ?? [];
   const fallback = {
-    posts: initialPosts,
+    posts: safePosts,
     page: 1,
-    hasMore: initialPosts.length === PAGE_SIZE,
+    hasMore: safePosts.length === PAGE_SIZE,
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -42,7 +43,7 @@ const getInitialFeedState = (initialPosts: PostType[]) => {
   }
 };
 
-const Feed = ({ initialPosts }: { initialPosts: PostType[] }) => {
+const Feed = ({ initialPosts = [] }: { initialPosts: PostType[] }) => {
   const [initialFeedState] = useState(() => getInitialFeedState(initialPosts));
   const [posts, setPosts] = useState<PostType[]>(initialFeedState.posts);
   const [loading, setLoading] = useState(false);
