@@ -4,19 +4,16 @@ export type NotificationType =
   | "friend_request"
   | "friend_accepted";
 
-export interface Notification {
+export type Notification = {
   id: string;
-  user_id: string;
-  sender_id: string;
-  type: NotificationType;
-  post_id: string | null;
+  userId: string;
+  content: string;
+  type: string;
   read: boolean;
-  created_at: string;
-  sender?: {
-    username: string;
-    avatar_url: string | null;
-  };
-}
+  senderId: string | null;
+  sender: { id: string; name: string | null; image: string | null } | null;
+  createdAt: string;
+};
 
 export const typeLabel = (
   type: string,

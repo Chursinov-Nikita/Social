@@ -1,163 +1,88 @@
 "use client";
-import { useAuth } from "@/app/context/auth";
+
+import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
-import useUnreadNotifications from "@/app/hooks/useUnreadNotification";
-import { createClient } from "@/app/lib/supabase/client";
+import { useUnreadCounts } from "@/app/hooks/useUnreadCounts";
 import { t } from "@/app/translation/translation";
 import type { Notification } from "@/app/types/notifications";
-import { typeLabel } from "@/app/types/notifications";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Loading from "../loading/Loading";
+
+type NotificationWithFriendship = Notification & {
+  friendshipId: string | null;
+};
 
 const Notifications = () => {
-  const { user } = useAuth();
-  const supabase = useMemo(() => createClient(), []);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { data: session } = useSession();
+  const [notifications, setNotifications] = useState<
+    NotificationWithFriendship[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
-  const [actionableRequestIds, setActionableRequestIds] = useState<Set<string>>(
-    new Set(),
-  );
   const { lang } = useLang();
   const tr = t[lang];
+  const { notifications: unreadCount } = useUnreadCounts();
 
-  const loadNotifications = useCallback(async () => {
-    if (!user) return;
-
-    const { data } = (await supabase
-      .from("notifications")
-      .select("*, sender:sender_id (username, avatar_url)")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50)) as { data: Notification[] | null };
-
-    if (!data) return setLoading(false);
-
+  const load = useCallback(async () => {
+    const res = await fetch("/api/notifications");
+    const data: NotificationWithFriendship[] = await res.json();
     setNotifications(data);
-
-    const requestSenderIds = [
-      ...new Set(
-        data.filter((n) => n.type === "friend_request").map((n) => n.sender_id),
-      ),
-    ];
-
-    if (requestSenderIds.length > 0) {
-      const { data: pendingRequests } = await supabase
-        .from("friendships")
-        .select("sender_id")
-        .eq("receiver_id", user.id)
-        .eq("status", "pending")
-        .in("sender_id", requestSenderIds);
-
-      const pendingSenders = new Set(
-        (pendingRequests ?? []).map(
-          (item: { sender_id: string }) => item.sender_id,
-        ),
-      );
-
-      setActionableRequestIds(
-        new Set(
-          data
-            .filter(
-              (n) =>
-                n.type === "friend_request" && pendingSenders.has(n.sender_id),
-            )
-            .map((n) => n.id),
-        ),
-      );
-    } else {
-      setActionableRequestIds(new Set());
-    }
-
     setLoading(false);
-  }, [user, supabase]);
+  }, []);
 
   useEffect(() => {
-    if (!user) return;
-
-    void loadNotifications();
-
-    const channel = supabase
-      .channel("notifications-channel")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "notifications" },
-        (payload: RealtimePostgresChangesPayload<Notification>) => {
-          if ((payload.new as Notification).user_id === user.id) {
-            void loadNotifications();
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadNotifications, supabase]);
-
-  const markAllRead = async () => {
-    if (!user) return;
-    await supabase
-      .from("notifications")
-      .update({ read: true })
-      .eq("user_id", user.id)
-      .eq("read", false);
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
+    if (!session?.user?.id) return;
+    void load();
+  }, [session?.user?.id, load]);
 
   const markRead = async (id: string) => {
-    await supabase.from("notifications").update({ read: true }).eq("id", id);
+    await fetch("/api/notifications/read", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
     );
   };
 
-  const handleRequestAction = async (
-    notification: Notification,
+  const markAllRead = async () => {
+    await fetch("/api/notifications/read", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const handleFriendRequest = async (
+    notification: NotificationWithFriendship,
     action: "accept" | "decline",
   ) => {
-    if (!user || actionLoadingId === notification.id) return;
+    if (!notification.friendshipId || actionLoadingId === notification.id)
+      return;
     setActionLoadingId(notification.id);
 
     try {
-      if (action === "accept") {
-        await supabase
-          .from("friendships")
-          .update({ status: "accepted" })
-          .eq("sender_id", notification.sender_id)
-          .eq("receiver_id", user.id)
-          .eq("status", "pending");
-      } else {
-        await supabase
-          .from("friendships")
-          .delete()
-          .eq("sender_id", notification.sender_id)
-          .eq("receiver_id", user.id)
-          .eq("status", "pending");
-      }
-
-      await supabase
-        .from("notifications")
-        .update({ read: true })
-        .eq("id", notification.id);
-
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)),
-      );
-      setActionableRequestIds((prev) => {
-        const next = new Set(prev);
-        next.delete(notification.id);
-        return next;
+      await fetch(`/api/friends/${notification.friendshipId}`, {
+        method: action === "accept" ? "PATCH" : "DELETE",
       });
+
+      // Убираем кнопки после действия
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === notification.id
+            ? { ...n, read: true, friendshipId: null }
+            : n,
+        ),
+      );
     } finally {
       setActionLoadingId(null);
     }
   };
 
-  const unreadCount = useUnreadNotifications();
-
   const formatDate = (dateStr: string) =>
-    new Date(dateStr + "Z").toLocaleString("ru", {
+    new Date(dateStr).toLocaleString("ru", {
       day: "numeric",
       month: "short",
       hour: "2-digit",
@@ -192,9 +117,7 @@ const Notifications = () => {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="w-5 h-5 border-2 border-(--text-primary)/20 border-t-(--text-primary)/60 rounded-full animate-spin" />
-          </div>
+          <Loading />
         ) : notifications.length === 0 ? (
           <div className="text-center py-12 text-(--text-primary)/20 text-sm">
             {tr.noNotificationsYet}
@@ -205,53 +128,57 @@ const Notifications = () => {
               <div
                 key={n.id}
                 onClick={() => !n.read && markRead(n.id)}
-                className={`flex items-center gap-3 p-4 rounded-xl transition-colors cursor-pointer bg-(--bg-secondary)
-                  ${!n.read ? "border border-(--border)" : ""}`}
+                className={`flex items-start gap-3 p-4 rounded-xl transition-colors cursor-pointer bg-(--bg-secondary) ${!n.read ? "border border-(--border)" : ""}`}
               >
                 <div
-                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${n.read ? "bg-transparent" : "bg-(--text-primary)"}`}
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 mt-2 ${n.read ? "bg-transparent" : "bg-(--text-primary)"}`}
                 />
 
                 <div className="w-9 h-9 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
-                  {n.sender?.username?.charAt(0).toUpperCase()}
+                  {n.sender?.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={n.sender.image}
+                      alt=""
+                      className="w-9 h-9 rounded-full object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
+                      {n.sender?.name?.[0].toUpperCase() ??
+                        n.type[0].toUpperCase()}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-(--text-primary) truncate">
-                    <span className="font-medium">{n.sender?.username}</span>{" "}
-                    <span className="text-(--text-primary)/50">
-                      {typeLabel(n.type, tr)}
-                    </span>
+                  <p className="text-sm text-(--text-primary)/80">
+                    {n.content}
                   </p>
                   <p className="text-xs text-(--text-primary)/30 mt-0.5">
-                    {formatDate(n.created_at)}
+                    {formatDate(n.createdAt)}
                   </p>
 
-                  {n.type === "friend_request" &&
-                    actionableRequestIds.has(n.id) && (
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleRequestAction(n, "accept");
-                          }}
-                          disabled={actionLoadingId === n.id}
-                          className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {tr.accept}
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleRequestAction(n, "decline");
-                          }}
-                          disabled={actionLoadingId === n.id}
-                          className="text-xs text-(--text-primary)/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-                        >
-                          {tr.decline}
-                        </button>
-                      </div>
-                    )}
+                  {n.type === "friend_request" && n.friendshipId && (
+                    <div
+                      className="mt-3 flex gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => handleFriendRequest(n, "accept")}
+                        disabled={actionLoadingId === n.id}
+                        className="text-xs text-(--text-primary) font-medium px-3 py-1.5 rounded-lg bg-(--bg-card) hover:opacity-80 transition-colors disabled:opacity-50"
+                      >
+                        {tr.accept}
+                      </button>
+                      <button
+                        onClick={() => handleFriendRequest(n, "decline")}
+                        disabled={actionLoadingId === n.id}
+                        className="text-xs text-(--text-primary)/40 hover:text-red-400 px-3 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                      >
+                        {tr.decline}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

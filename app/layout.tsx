@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { Nunito } from "next/font/google";
 import "./globals.css";
 import Header from "./components/header/page";
-import { AuthProvider } from "./context/auth";
 import { LanguageProvider } from "./context/language";
+import { SessionProvider } from "next-auth/react";
 
 const nunito = Nunito({
   subsets: ["latin", "cyrillic"],
@@ -24,12 +24,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${nunito.className} antialiased`}>
-        <AuthProvider>
+        <SessionProvider>
           <LanguageProvider>
             <Header />
-            <main className="pt-15 bg-(--bg-primary) ">{children}</main>
+            <main className="pt-15 bg-(--bg-primary)">{children}</main>
           </LanguageProvider>
-        </AuthProvider>
+        </SessionProvider>
       </body>
     </html>
   );

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChatUser } from "@/app/types/chat";
-import UserList from "@/app/components/chat/UserList";
-import ChatWindow from "@/app/components/chat/ChatWindow";
+import type { ChatUser } from "@/app/types/chat";
+import UserList from "./UserList";
+import ChatWindow from "./ChatWindow";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
 

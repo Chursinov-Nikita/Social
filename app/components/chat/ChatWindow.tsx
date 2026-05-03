@@ -1,225 +1,175 @@
 "use client";
-import React, { useEffect, useRef, useState } from "react";
-import { Message, ChatWindowProps } from "@/app/types/chat";
-import { useAuth } from "@/app/context/auth";
-import { createClient } from "@/app/lib/supabase/client";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+
+import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
+import type { ChatUser, Message } from "@/app/types/chat";
+import { useEffect, useRef, useState } from "react";
+import { socket } from "@/lib/socket";
 
-const getChatCacheKey = (currentUserId: string, recipientId: string) => {
-  const [first, second] = [currentUserId, recipientId].sort();
-  return `chat-messages:${first}:${second}`;
-};
+const PAGE_SIZE = 50;
 
-const MESSAGE_PAGE_SIZE = 50;
-const MAX_CACHED_MESSAGES = 200;
+const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
+  const { data: session } = useSession();
+  const { lang } = useLang();
+  const tr = t[lang];
+  const currentUserId = session?.user?.id;
 
-const ChatWindow = ({ recipient }: ChatWindowProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [hasFetchedMessages, setHasFetchedMessages] = useState(false);
-  const { user } = useAuth();
-  const supabase = React.useMemo(() => createClient(), []);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const { lang } = useLang();
-  const tr = t[lang];
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const cachedMessages = React.useMemo(() => {
-    if (!user) return [] as Message[];
-    const cacheKey = getChatCacheKey(user.id, recipient.id);
-    const raw = localStorage.getItem(cacheKey);
-    if (!raw) return [] as Message[];
-    try {
-      return JSON.parse(raw) as Message[];
-    } catch {
-      localStorage.removeItem(cacheKey);
-      return [] as Message[];
-    }
-  }, [user, recipient.id]);
-
+  // Загрузка сообщений
   useEffect(() => {
-    if (!user) return;
-    const cacheKey = getChatCacheKey(user.id, recipient.id);
-    const loadMessages = async () => {
-      const { data } = (await supabase
-        .from("messages")
-        .select("*")
-        .or(
-          `and(sender_id.eq.${user.id},receiver_id.eq.${recipient.id}),and(sender_id.eq.${recipient.id},receiver_id.eq.${user.id})`,
-        )
-        .order("created_at", { ascending: false })
-        .limit(MESSAGE_PAGE_SIZE)) as {
-        data: Message[] | null;
-        error: unknown;
-      };
-      if (data) {
-        const normalized = [...data].reverse();
-        setMessages(normalized);
-        setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE);
-        localStorage.setItem(
-          cacheKey,
-          JSON.stringify(normalized.slice(-MAX_CACHED_MESSAGES)),
-        );
+    if (!currentUserId) return;
+    setMessages([]);
+    setHasMore(true);
+
+    fetch(`/api/chat/messages?recipientId=${recipient.id}`)
+      .then((r) => r.json())
+      .then((data: Message[]) => {
+        setMessages(data);
+        setHasMore(data.length === PAGE_SIZE);
+      });
+
+    // Отметить как прочитанные
+    fetch("/api/chat/messages/read", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ senderId: recipient.id }),
+    });
+  }, [recipient.id, currentUserId]);
+
+  // Socket.io — получение новых сообщений
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    socket.emit("join", currentUserId);
+
+    const handler = (msg: Message) => {
+      const isRelevant =
+        (msg.senderId === currentUserId && msg.receiverId === recipient.id) ||
+        (msg.senderId === recipient.id && msg.receiverId === currentUserId);
+      if (isRelevant && msg.senderId !== currentUserId) {
+        setMessages((prev) => [...prev, msg]);
+        // Отметить как прочитанное
+        fetch("/api/chat/messages/read", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ senderId: recipient.id }),
+        });
       }
-      setHasFetchedMessages(true);
     };
-    loadMessages();
-  }, [user, recipient.id, supabase]);
 
-  useEffect(() => {
-    if (!user) return;
-    const channel = supabase
-      .channel(`chat-${user.id}-${recipient.id}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        (payload: RealtimePostgresChangesPayload<Message>) => {
-          const newMsg = payload.new as Message;
-          const isRelevant =
-            (newMsg.sender_id === user.id &&
-              newMsg.receiver_id === recipient.id) ||
-            (newMsg.sender_id === recipient.id &&
-              newMsg.receiver_id === user.id);
-          if (isRelevant && newMsg.sender_id !== user.id)
-            setMessages((prev) => [...prev, newMsg]);
-        },
-      )
-      .subscribe();
+    socket.on("new_message", handler);
     return () => {
-      supabase.removeChannel(channel);
+      socket.off("new_message", handler);
     };
-  }, [user, recipient.id, supabase]);
+  }, [currentUserId, recipient.id]);
 
+  // Скролл вниз при новых сообщениях
   useEffect(() => {
-    if (!user || (!hasFetchedMessages && messages.length === 0)) return;
-    const cacheKey = getChatCacheKey(user.id, recipient.id);
-    localStorage.setItem(
-      cacheKey,
-      JSON.stringify(messages.slice(-MAX_CACHED_MESSAGES)),
-    );
-  }, [messages, user, recipient.id, hasFetchedMessages]);
+    const c = containerRef.current;
+    if (c) c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
+  }, [messages]);
 
-  useEffect(() => {
-    if (!user) return;
-    const markAsRead = async () => {
-      await supabase
-        .from("messages")
-        .update({ read: true })
-        .eq("receiver_id", user.id)
-        .eq("sender_id", recipient.id)
-        .eq("read", false);
-    };
-    void markAsRead();
-  }, [user, recipient.id, supabase]);
-
-  const displayedMessages =
-    hasFetchedMessages || messages.length > 0 ? messages : cachedMessages;
-
-  const loadOlderMessages = async () => {
-    if (!user || !displayedMessages.length || loadingOlder || !hasMoreMessages)
-      return;
+  const loadOlder = async () => {
+    if (!messages.length || loadingOlder || !hasMore) return;
     setLoadingOlder(true);
-    const { data } = (await supabase
-      .from("messages")
-      .select("*")
-      .or(
-        `and(sender_id.eq.${user.id},receiver_id.eq.${recipient.id}),and(sender_id.eq.${recipient.id},receiver_id.eq.${user.id})`,
-      )
-      .lt("created_at", displayedMessages[0].created_at)
-      .order("created_at", { ascending: false })
-      .limit(MESSAGE_PAGE_SIZE)) as { data: Message[] | null; error: unknown };
-    if (data) {
-      setMessages((prev) => [...[...data].reverse(), ...prev]);
-      setHasMoreMessages(data.length === MESSAGE_PAGE_SIZE);
-    }
+    const cursor = messages[0].createdAt;
+    const res = await fetch(
+      `/api/chat/messages?recipientId=${recipient.id}&cursor=${cursor}`,
+    );
+    const older: Message[] = await res.json();
+    setMessages((prev) => [...older, ...prev]);
+    setHasMore(older.length === PAGE_SIZE);
     setLoadingOlder(false);
   };
 
-  useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-  }, [messages]);
-
   const sendMessage = async () => {
-    if (!content.trim() || !user) return;
+    if (!content.trim() || !currentUserId) return;
     setLoading(true);
-    const optimisticMsg: Message = {
-      id: crypto.randomUUID(),
-      sender_id: user.id,
-      receiver_id: recipient.id,
-      content: content.trim(),
-      created_at: new Date().toISOString(),
-      read: false,
-    };
-    setMessages((prev) => [...prev, optimisticMsg]);
-    setContent("");
-    const { error } = await supabase.from("messages").insert({
-      sender_id: user.id,
-      receiver_id: recipient.id,
-      content: optimisticMsg.content,
-    });
-    if (error) {
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
-      setContent(optimisticMsg.content);
-    }
-    setLoading(false);
-  };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
+    const optimistic: Message = {
+      id: crypto.randomUUID(),
+      senderId: currentUserId,
+      receiverId: recipient.id,
+      content: content.trim(),
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setContent("");
+
+    try {
+      const res = await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          receiverId: recipient.id,
+          content: optimistic.content,
+        }),
+      });
+      const saved: Message = await res.json();
+      setMessages((prev) =>
+        prev.map((m) => (m.id === optimistic.id ? saved : m)),
+      );
+      socket.emit("send_message", saved);
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      setContent(optimistic.content);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden bg-(--bg-primary)">
+      {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-(--border) bg-(--bg-secondary)">
         <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
-          {recipient.username.charAt(0).toUpperCase()}
+          {recipient.name?.[0].toUpperCase() ?? "?"}
         </div>
         <div>
           <p className="text-sm font-semibold text-(--text-primary)">
-            {recipient.username}
+            {recipient.name}
           </p>
           <p className="text-xs text-(--text-primary)/30">{tr.online}</p>
         </div>
       </div>
 
+      {/* Messages */}
       <div
-        ref={messagesContainerRef}
+        ref={containerRef}
         className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-1 [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]"
       >
-        {displayedMessages.length > 0 && hasMoreMessages && (
+        {hasMore && (
           <div className="flex justify-center pb-3">
             <button
-              onClick={loadOlderMessages}
+              onClick={loadOlder}
               disabled={loadingOlder}
-              className="text-xs px-3 py-1.5 rounded-full bg-(--bg-secondary) text-(--text-primary)/80 hover:bg-(--bg-card) disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="text-xs px-3 py-1.5 rounded-full bg-(--bg-secondary) text-(--text-primary)/80 hover:bg-(--bg-card) disabled:opacity-40 transition-colors"
             >
               {loadingOlder ? tr.loading : tr.loadOlderMessages}
             </button>
           </div>
         )}
-        {displayedMessages.map((msg) => {
-          const isMe = msg.sender_id === user?.id;
+        {messages.map((msg) => {
+          const isMe = msg.senderId === currentUserId;
           return (
             <div
               key={msg.id}
               className={`flex ${isMe ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-xs px-3 py-2 rounded-2xl text-sm leading-relaxed text-(--text-primary)
-                ${isMe ? "bg-(--bg-card) rounded-br-sm" : "bg-(--bg-secondary) rounded-bl-sm"}`}
+                className={`max-w-xs px-3 py-2 rounded-2xl text-sm leading-relaxed text-(--text-primary) ${isMe ? "bg-(--bg-card) rounded-br-sm" : "bg-(--bg-secondary) rounded-bl-sm"}`}
               >
                 <p>{msg.content}</p>
                 <p className="text-[10px] mt-1 text-right text-(--text-primary)/30">
-                  {new Date(msg.created_at).toLocaleTimeString("ru", {
+                  {new Date(msg.createdAt).toLocaleTimeString("ru", {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}
@@ -230,12 +180,18 @@ const ChatWindow = ({ recipient }: ChatWindowProps) => {
         })}
       </div>
 
+      {/* Input */}
       <div className="px-4 py-3 border-t border-(--border) bg-(--bg-secondary)">
         <div className="flex items-end gap-2">
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
             placeholder={tr.writeMessage}
             rows={1}
             className="flex-1 bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl px-4 py-2.5 text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 resize-none focus:outline-none transition-colors"

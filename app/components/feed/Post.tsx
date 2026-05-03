@@ -1,354 +1,245 @@
 "use client";
 import { useLang } from "@/app/context/language";
-import { createClient } from "@/app/lib/supabase/client";
 import { t } from "@/app/translation/translation";
-import type { Comment, PostProps } from "@/app/types/feed";
+import type { Comment, Post } from "@/app/types/feed";
 import {
   ChatBubbleLeftIcon,
+  EllipsisHorizontalIcon,
   HeartIcon,
+  TrashIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
-import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-const commentsCache = new Map<string, Comment[]>();
+// In-memory кэш комментариев
+const MAX_CACHE = 50;
+const cache = new Map<string, Comment[]>();
+const setCache = (id: string, comments: Comment[]) => {
+  if (cache.size >= MAX_CACHE) cache.delete(cache.keys().next().value!);
+  cache.set(id, comments);
+};
 
-const Post = ({
+type Props = {
+  post: Post;
+  currentUserId: string | null;
+  onPostDeleted?: (id: string) => void;
+  onLikeChange?: (id: string, liked: boolean) => void;
+};
+
+const PostCard = ({
   post,
   currentUserId,
-  initialLiked,
+  onPostDeleted,
   onLikeChange,
-}: PostProps & { onLikeChange?: (delta: number) => void }) => {
-  const supabase = useMemo(() => createClient(), []);
+}: Props) => {
   const { lang } = useLang();
   const tr = t[lang];
-  const [liked, setLiked] = useState<boolean>(initialLiked);
-  const [likesCount, setLikesCount] = useState<number>(post.likes_count ?? 0);
+
+  const liked = (post.likes ?? []).some((l) => l.userId === currentUserId);
+  const likesCount = (post.likes ?? []).length;
+
+  const [isLiking, setIsLiking] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [comments, setComments] = useState<Comment[]>([]);
+  const [comments, setComments] = useState<Comment[]>(cache.get(post.id) ?? []);
+  const [commentsCount, setCommentsCount] = useState(post._count.comments);
   const [commentText, setCommentText] = useState("");
-  const [commentsCount, setCommentsCount] = useState(post.comments_count ?? 0);
   const [loadingComments, setLoadingComments] = useState(false);
   const [loadingComment, setLoadingComment] = useState(false);
-  const [isLiking, setIsLiking] = useState(false);
   const [commentToDelete, setCommentToDelete] = useState<string | null>(null);
-  const lastPostIdRef = useRef(post.id);
-  const pendingOwnLike = useRef(false);
-  const currentUserIdRef = useRef(currentUserId);
-  useEffect(() => {
-    currentUserIdRef.current = currentUserId;
-  }, [currentUserId]);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingPost, setDeletingPost] = useState(false);
+
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setLiked(initialLiked);
-  }, [post.id, initialLiked]);
-
-  useEffect(() => {
-    if (lastPostIdRef.current === post.id) return;
-    lastPostIdRef.current = post.id;
-    setLiked(initialLiked);
-    setLikesCount(post.likes_count ?? 0);
-    setCommentsCount(post.comments_count ?? 0);
-    setComments(commentsCache.get(post.id) ?? []);
-    setShowComments(false);
-  }, [post.id, post.likes_count, post.comments_count, initialLiked]);
+    if (!showMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+        setShowMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showMenu]);
 
   const loadComments = useCallback(
-    async (forceRefresh = false) => {
-      const cachedComments = commentsCache.get(post.id);
-      if (cachedComments && !forceRefresh) {
-        setComments(cachedComments);
-        setCommentsCount(cachedComments.length);
+    async (force = false) => {
+      const cached = cache.get(post.id);
+      if (cached && !force) {
+        setComments(cached);
         return;
       }
-      if (!cachedComments) setLoadingComments(true);
-      const { data } = (await supabase
-        .from("comments")
-        .select(
-          "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
-        )
-        .eq("post_id", post.id)
-        .order("created_at", { ascending: true })) as {
-        data: Comment[] | null;
-      };
-      if (data) {
-        commentsCache.set(post.id, data);
-        setComments(data);
-        setCommentsCount(data.length);
-      }
+      setLoadingComments(true);
+      const res = await fetch(`/api/posts/${post.id}/comments`);
+      const data: Comment[] = await res.json();
+      setCache(post.id, data);
+      setComments(data);
+      setCommentsCount(data.length);
       setLoadingComments(false);
     },
-    [post.id, supabase],
+    [post.id],
   );
 
   useEffect(() => {
-    loadComments();
-  }, [loadComments]);
+    if (showComments) loadComments();
+  }, [showComments, loadComments]);
 
-  // Realtime — комментарии
-  useEffect(() => {
-    if (!showComments) return;
-    const channel = supabase
-      .channel(`comments-${post.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "comments",
-          filter: `post_id=eq.${post.id}`,
-        },
-        async (payload: RealtimePostgresChangesPayload<Comment>) => {
-          const id = (payload.new as Partial<Comment>).id;
-          if (!id) return;
-          const { data } = (await supabase
-            .from("comments")
-            .select(
-              "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
-            )
-            .eq("id", id)
-            .single()) as { data: Comment | null };
-          if (!data) return;
-          setComments((prev) => {
-            if (prev.some((c) => c.id === data.id)) return prev;
-            const next = [...prev, data];
-            commentsCache.set(post.id, next);
-            setCommentsCount(next.length);
-            return next;
-          });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "comments",
-          filter: `post_id=eq.${post.id}`,
-        },
-        (payload: RealtimePostgresChangesPayload<Comment>) => {
-          const deletedId = (payload.old as Partial<Comment>).id;
-          if (!deletedId) return;
-          setComments((prev) => {
-            const next = prev.filter((c) => c.id !== deletedId);
-            commentsCache.set(post.id, next);
-            setCommentsCount(next.length);
-            return next;
-          });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [post.id, showComments, supabase]);
-
-  // Realtime — лайки от других пользователей
-  useEffect(() => {
-    const channel = supabase
-      .channel(`likes-${post.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "likes",
-          filter: `post_id=eq.${post.id}`,
-        },
-        (
-          payload: RealtimePostgresChangesPayload<{
-            user_id: string;
-            post_id: string;
-          }>,
-        ) => {
-          const newLike = payload.new as { user_id: string };
-          // Используем реф вместо замыкания — всегда актуальный currentUserId
-          if (
-            newLike.user_id === currentUserIdRef.current ||
-            pendingOwnLike.current
-          )
-            return;
-          setLikesCount((prev) => prev + 1);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "likes",
-          filter: `post_id=eq.${post.id}`,
-        },
-        (
-          payload: RealtimePostgresChangesPayload<{
-            user_id: string;
-            post_id: string;
-          }>,
-        ) => {
-          const oldLike = payload.old as { user_id?: string };
-          if (
-            oldLike.user_id === currentUserIdRef.current ||
-            pendingOwnLike.current
-          )
-            return;
-          setLikesCount((prev) => Math.max(prev - 1, 0));
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-    // Убрали currentUserId из deps — используем реф, канал не пересоздаётся
-  }, [post.id, supabase]);
-
+  // Лайк — optimistic update
   const handleLike = async () => {
     if (!currentUserId || isLiking) return;
     setIsLiking(true);
-    pendingOwnLike.current = true;
-
-    const previousLiked = liked;
-    const previousCount = likesCount;
-    const newLiked = !liked;
-
-    setLiked(newLiked);
-    setLikesCount(
-      newLiked ? previousCount + 1 : Math.max(previousCount - 1, 0),
-    );
-
+    // Optimistic UI через onLikeChange в Feed
+    onLikeChange?.(post.id, !liked);
     try {
-      if (newLiked) {
-        const { error } = await supabase
-          .from("likes")
-          .upsert(
-            { post_id: post.id, user_id: currentUserId },
-            { onConflict: "post_id,user_id", ignoreDuplicates: true },
-          );
-        if (error) {
-          setLiked(previousLiked);
-          setLikesCount(previousCount);
-        } else {
-          onLikeChange?.(1);
-        }
-      } else {
-        const { error } = await supabase
-          .from("likes")
-          .delete()
-          .eq("post_id", post.id)
-          .eq("user_id", currentUserId);
-        if (error) {
-          setLiked(previousLiked);
-          setLikesCount(previousCount);
-        } else {
-          onLikeChange?.(-1);
-        }
-      }
+      const res = await fetch(`/api/posts/${post.id}/like`, { method: "POST" });
+      const data = await res.json();
+      // Если сервер вернул другой результат — синхронизируем
+      if (data.liked !== !liked) onLikeChange?.(post.id, data.liked);
+    } catch {
+      // Откат при ошибке
+      onLikeChange?.(post.id, liked);
     } finally {
       setIsLiking(false);
-      setTimeout(() => {
-        pendingOwnLike.current = false;
-      }, 500);
     }
   };
 
   const handleComment = async () => {
     if (!commentText.trim() || !currentUserId) return;
     setLoadingComment(true);
-    const optimisticComment: Comment = {
+    const optimistic: Comment = {
       id: crypto.randomUUID(),
-      post_id: post.id,
-      user_id: currentUserId,
       content: commentText.trim(),
-      created_at: new Date().toISOString(),
-      profiles: { username: "Вы", avatar_url: null },
+      postId: post.id,
+      authorId: currentUserId,
+      author: { id: currentUserId, name: tr.you ?? "Вы", image: null },
+      createdAt: new Date().toISOString(),
     };
     setComments((prev) => {
-      const next = [...prev, optimisticComment];
-      commentsCache.set(post.id, next);
+      const next = [...prev, optimistic];
+      setCache(post.id, next);
       return next;
     });
-    setCommentsCount((prev) => prev + 1);
+    setCommentsCount((c) => c + 1);
     setCommentText("");
-    const { data: savedComment, error } = (await supabase
-      .from("comments")
-      .insert({
-        post_id: post.id,
-        user_id: currentUserId,
-        content: optimisticComment.content,
-      })
-      .select(
-        "id, post_id, user_id, content, created_at, profiles:user_id (username, avatar_url)",
-      )
-      .single()) as { data: Comment | null; error: unknown };
-    if (error) {
+
+    try {
+      const res = await fetch(`/api/posts/${post.id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: optimistic.content }),
+      });
+      const saved: Comment = await res.json();
       setComments((prev) => {
-        const next = prev.filter((c) => c.id !== optimisticComment.id);
-        commentsCache.set(post.id, next);
-        setCommentsCount(next.length);
+        const next = prev.map((c) => (c.id === optimistic.id ? saved : c));
+        setCache(post.id, next);
         return next;
       });
-      setCommentText(optimisticComment.content);
-    } else if (savedComment) {
+    } catch {
       setComments((prev) => {
-        const next = prev.map((c) =>
-          c.id === optimisticComment.id ? savedComment : c,
-        );
-        commentsCache.set(post.id, next);
+        const next = prev.filter((c) => c.id !== optimistic.id);
+        setCache(post.id, next);
         return next;
       });
+      setCommentsCount((c) => c - 1);
+      setCommentText(optimistic.content);
+    } finally {
+      setLoadingComment(false);
     }
-    setLoadingComment(false);
   };
 
   const confirmDeleteComment = async () => {
     if (!commentToDelete) return;
-    setComments((prev) => {
-      const next = prev.filter((c) => c.id !== commentToDelete);
-      commentsCache.set(post.id, next);
+    const prev = comments;
+    setComments((c) => {
+      const next = c.filter((x) => x.id !== commentToDelete);
+      setCache(post.id, next);
       setCommentsCount(next.length);
       return next;
     });
-    await supabase.from("comments").delete().eq("id", commentToDelete);
     setCommentToDelete(null);
+    try {
+      await fetch(`/api/posts/${post.id}/comments/${commentToDelete}`, {
+        method: "DELETE",
+      });
+    } catch {
+      setComments(prev);
+      setCommentsCount(prev.length);
+    }
   };
 
-  const username = post.profiles?.username ?? "Аноним";
-  const avatarUrl = post.profiles?.avatar_url ?? null;
+  const handleDeletePost = async () => {
+    if (deletingPost) return;
+    setDeletingPost(true);
+    try {
+      await fetch(`/api/posts/${post.id}`, { method: "DELETE" });
+      cache.delete(post.id);
+      onPostDeleted?.(post.id);
+    } catch {
+      setDeletingPost(false);
+    }
+  };
+
+  const isOwn = currentUserId === post.authorId;
+  const username = post.author.name ?? "Аноним";
 
   return (
     <div className="rounded-xl bg-(--bg-secondary) overflow-hidden">
-      <div className="px-4 pt-4 pb-2 flex items-center space-x-3">
-        {avatarUrl ? (
-          <Image
-            src={avatarUrl}
-            width={40}
-            height={40}
-            className="rounded-full object-cover w-10 h-10"
-            alt={`Аватар ${username}`}
-          />
-        ) : (
-          <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold text-(--text-primary) shrink-0">
-            {username.charAt(0).toUpperCase()}
+      <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          {post.author.image ? (
+            <Image
+              src={post.author.image}
+              width={40}
+              height={40}
+              className="rounded-full object-cover w-10 h-10"
+              alt={username}
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold text-(--text-primary) shrink-0">
+              {username.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span className="font-semibold text-sm text-(--text-primary)">
+            {username}
+          </span>
+        </div>
+
+        {isOwn && (
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setShowMenu((p) => !p)}
+              className="p-1.5 rounded-lg text-(--text-primary)/30 hover:text-(--text-primary)/70 hover:bg-(--bg-card) transition-colors"
+            >
+              <EllipsisHorizontalIcon className="w-5 h-5" />
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 top-8 z-20 min-w-37.5 rounded-xl border border-(--border) bg-(--bg-secondary) shadow-lg overflow-hidden">
+                <button
+                  onClick={() => {
+                    setShowMenu(false);
+                    setShowDeleteModal(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-(--bg-card) transition-colors"
+                >
+                  <TrashIcon className="w-4 h-4" />
+                  {tr.deletePost ?? "Удалить пост"}
+                </button>
+              </div>
+            )}
           </div>
         )}
-        <span className="font-semibold text-sm text-(--text-primary)">
-          {username}
-        </span>
       </div>
 
-      {post.image_url && (
+      {post.imageUrl && (
         <div className="relative w-full aspect-video">
           <Image
-            src={post.image_url}
+            src={post.imageUrl}
             fill
+            sizes="100vw"
             className="object-cover px-4"
-            alt={
-              post.content
-                ? `Фото к посту: ${post.content.slice(0, 50)}`
-                : "Изображение поста"
-            }
+            alt="Изображение поста"
           />
         </div>
       )}
@@ -359,37 +250,28 @@ const Post = ({
             {post.content}
           </p>
         )}
-
         <div className="h-px bg-(--border)" />
 
         <div className="flex space-x-4">
           <button
             onClick={handleLike}
-            disabled={!currentUserId}
-            className={`flex items-center space-x-1.5 text-sm transition-all duration-200 disabled:opacity-30 ${
-              liked
-                ? "text-red-400"
-                : "text-(--text-primary)/30 hover:text-red-400"
-            }`}
+            disabled={!currentUserId || isLiking}
+            className={`flex items-center space-x-1.5 text-sm transition-all duration-200 disabled:opacity-30 ${liked ? "text-red-400" : "text-(--text-primary)/30 hover:text-red-400"}`}
           >
             {liked ? (
               <HeartSolidIcon className="w-5 h-5" />
             ) : (
               <HeartIcon className="w-5 h-5" />
             )}
-            <span suppressHydrationWarning>{likesCount}</span>
+            <span>{likesCount}</span>
           </button>
 
           <button
-            onClick={() => setShowComments((prev) => !prev)}
-            className={`flex items-center space-x-1.5 text-sm transition-colors duration-200 ${
-              showComments
-                ? "text-(--text-primary)/60"
-                : "text-(--text-primary)/30 hover:text-(--text-primary)/60"
-            }`}
+            onClick={() => setShowComments((p) => !p)}
+            className={`flex items-center space-x-1.5 text-sm transition-colors duration-200 ${showComments ? "text-(--text-primary)/60" : "text-(--text-primary)/30 hover:text-(--text-primary)/60"}`}
           >
             <ChatBubbleLeftIcon className="w-5 h-5" />
-            <span suppressHydrationWarning>{commentsCount}</span>
+            <span>{commentsCount}</span>
           </button>
         </div>
 
@@ -409,17 +291,17 @@ const Post = ({
                 comments.map((comment) => (
                   <div key={comment.id} className="flex items-start gap-2">
                     <div className="w-7 h-7 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary) shrink-0">
-                      {comment.profiles?.username?.charAt(0).toUpperCase()}
+                      {comment.author.name?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <span className="text-xs font-medium text-(--text-primary)/70 mr-1">
-                        {comment.profiles?.username}
+                        {comment.author.name}
                       </span>
                       <p className="text-xs text-(--text-primary)/50 leading-relaxed">
                         {comment.content}
                       </p>
                     </div>
-                    {comment.user_id === currentUserId && (
+                    {comment.authorId === currentUserId && (
                       <button
                         onClick={() => setCommentToDelete(comment.id)}
                         className="text-(--text-primary)/20 hover:text-red-400 transition-colors shrink-0"
@@ -455,6 +337,7 @@ const Post = ({
         )}
       </div>
 
+      {/* Модалка удаления комментария */}
       {commentToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl">
@@ -467,7 +350,7 @@ const Post = ({
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setCommentToDelete(null)}
-                className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-colors"
+                className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:bg-(--bg-card) transition-colors"
               >
                 {tr.cancel}
               </button>
@@ -481,8 +364,63 @@ const Post = ({
           </div>
         </div>
       )}
+
+      {/* Модалка удаления поста */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl">
+            <h2 className="text-base font-semibold text-(--text-primary)">
+              {tr.deletePost ?? "Удалить пост"}
+            </h2>
+            <p className="mt-2 text-sm text-(--text-primary)/60">
+              {tr.deletePostDesc ?? "Это действие нельзя отменить."}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deletingPost}
+                className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:bg-(--bg-card) transition-colors disabled:opacity-30"
+              >
+                {tr.cancel}
+              </button>
+              <button
+                onClick={handleDeletePost}
+                disabled={deletingPost}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deletingPost ? (
+                  <>
+                    <svg
+                      className="w-3.5 h-3.5 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8v8z"
+                      />
+                    </svg>
+                    {tr.deleting ?? "Удаление..."}
+                  </>
+                ) : (
+                  tr.delete
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-export default Post;
+export default PostCard;

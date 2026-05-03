@@ -1,7 +1,7 @@
-import CreateReel from "./CreateReel";
+import FeedReels from "./FeedReels";
 
 const page = () => {
-  return <CreateReel />;
+  return <FeedReels />;
 };
 
 export default page;

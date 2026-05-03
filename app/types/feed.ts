@@ -1,38 +1,25 @@
-export interface Profile {
-  username: string;
-  avatar_url: string | null;
-}
-
-export interface Post {
+export type PostAuthor = {
   id: string;
-  user_id: string;
-  content: string;
-  image_url: string | null;
-  likes_count: number;
-  comments_count: number;
-  created_at: string;
-  profiles: Profile | null;
-  likes?: { user_id: string }[];
-}
+  name: string | null;
+  image: string | null;
+};
 
-export interface Comment {
+export type Post = {
   id: string;
-  post_id: string;
-  user_id: string;
   content: string;
-  created_at: string;
-  profiles?: {
-    username: string;
-    avatar_url: string | null;
-  };
-}
+  imageUrl: string | null;
+  authorId: string;
+  author: PostAuthor;
+  likes: { userId: string }[];
+  _count: { comments: number };
+  createdAt: string;
+};
 
-export interface PostProps {
-  post: Post;
-  currentUserId: string | null;
-  initialLiked: boolean;
-}
-
-export interface CreatePostProps {
-  onPostCreated?: (post: Post) => void;
-}
+export type Comment = {
+  id: string;
+  content: string;
+  postId: string;
+  authorId: string;
+  author: PostAuthor;
+  createdAt: string;
+};

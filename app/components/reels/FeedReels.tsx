@@ -1,45 +1,32 @@
-import { useAuth } from "@/app/context/auth";
-import { createClient } from "@/app/lib/supabase/client";
-import { Video } from "@/app/types/reels";
-import { useEffect, useMemo, useState } from "react";
+"use client";
+
+import { useSession } from "next-auth/react";
+import type { Reel } from "@/app/types/reels";
+import { useEffect, useState } from "react";
 import PostReels from "./PostReels";
+import CreateReel from "./CreateReel";
 
 const FeedReels = () => {
-  const [videos, setVideos] = useState<Video[]>([]);
-  const { user } = useAuth();
-  const supabase = useMemo(() => createClient(), []);
+  const { data: session } = useSession();
+  const [reels, setReels] = useState<Reel[]>([]);
+  const currentUserId = session?.user?.id ?? null;
+
   useEffect(() => {
-    const loadReels = async () => {
-      const { data } = await supabase
-        .from("videos")
-        .select(
-          "id, user_id, title, description, video_url, thumbnail_url, views_count, created_at, profiles(username, avatar_url), video_likes(user_id)",
-        )
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (data) setVideos(data);
-    };
-    void loadReels();
-  }, [supabase]);
+    fetch("/api/reels")
+      .then((r) => r.json())
+      .then(setReels);
+  }, []);
 
   return (
-    <div>
-      <h1>FeedReels</h1>
-      <div className="h-dvh overflow-y-scroll snap-y snap-mandatory">
-        {videos.map((video) => (
-          <div key={video.id} className="snap-start snap-always h-dvh">
-            <PostReels
-              video={video}
-              currentUserId={user?.id ?? null}
-              initialLiked={
-                video.video_likes?.some(
-                  (likes) => likes.user_id === user?.id,
-                ) ?? false
-              }
-            />
+    <div className="relative">
+      <div className="h-dvh overflow-y-scroll snap-y snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {reels.map((reel) => (
+          <div key={reel.id} className="snap-start snap-always h-dvh">
+            <PostReels reel={reel} currentUserId={currentUserId} />
           </div>
         ))}
       </div>
+      <CreateReel />
     </div>
   );
 };

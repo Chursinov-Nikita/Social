@@ -1,9 +1,9 @@
 "use client";
+import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
-import { createClient } from "@/app/lib/supabase/client";
 import { t } from "@/app/translation/translation";
-import type { CreatePostProps } from "@/app/types/feed";
-import { useState } from "react";
+import type { Post } from "@/app/types/feed";
+import { useEffect, useState } from "react";
 
 const MAX_RAW_SIZE_MB = 20;
 const MAX_WIDTH = 1920;
@@ -11,37 +11,24 @@ const MAX_HEIGHT = 1080;
 const QUALITY = 0.8;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-const validateImage = (file: File): "type" | "size" | null => {
-  if (!ALLOWED_TYPES.includes(file.type)) return "type";
-  if (file.size > MAX_RAW_SIZE_MB * 1024 * 1024) return "size";
-  return null;
-};
-
-const compressImage = (file: File): Promise<File> => {
-  return new Promise((resolve, reject) => {
+const compressImage = (file: File): Promise<File> =>
+  new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
-
     img.onload = () => {
       URL.revokeObjectURL(url);
-
       let { width, height } = img;
-
       if (width > MAX_WIDTH || height > MAX_HEIGHT) {
         const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
         width = Math.round(width * ratio);
         height = Math.round(height * ratio);
       }
-
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-
       const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("Canvas context error"));
-
+      if (!ctx) return reject(new Error("Canvas error"));
       ctx.drawImage(img, 0, 0, width, height);
-
       canvas.toBlob(
         (blob) => {
           if (!blob) return reject(new Error("Compression failed"));
@@ -56,40 +43,47 @@ const compressImage = (file: File): Promise<File> => {
         QUALITY,
       );
     };
-
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("Image load error"));
+      reject(new Error("Load error"));
     };
-
     img.src = url;
   });
-};
 
-const CreatePost = ({ onPostCreated }: CreatePostProps) => {
+const CreatePost = ({
+  onPostCreated,
+}: {
+  onPostCreated?: (post: Post) => void;
+}) => {
+  const { data: session } = useSession();
   const { lang } = useLang();
   const tr = t[lang];
+
   const [content, setContent] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [compressing, setCompressing] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
-  const supabase = createClient();
+
+  useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview);
+    },
+    [preview],
+  );
 
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-
     setImageError(null);
 
-    const error = validateImage(file);
-    if (error === "type") {
+    if (!ALLOWED_TYPES.includes(file.type)) {
       setImageError(tr.imageTypeError);
       return;
     }
-    if (error === "size") {
+    if (file.size > MAX_RAW_SIZE_MB * 1024 * 1024) {
       setImageError(tr.imageSizeError(MAX_RAW_SIZE_MB));
       return;
     }
@@ -116,37 +110,30 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
 
   const handleSubmit = async () => {
     if (!content.trim() && !image) return;
+    if (!session?.user?.id) return;
     setLoading(true);
 
     try {
-      let imageUrl = null;
+      let imageUrl: string | null = null;
 
       if (image) {
-        const fileName = `${crypto.randomUUID()}.jpg`;
-        const { error: uploadError } = await supabase.storage
-          .from("posts")
-          .upload(fileName, image);
-        if (uploadError) {
-          alert(`Не удалось загрузить фото: ${uploadError.message}`);
-          setLoading(false);
-          return;
-        }
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("posts").getPublicUrl(fileName);
-        imageUrl = publicUrl;
+        const formData = new FormData();
+        formData.append("file", image);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        imageUrl = data.url;
       }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      const { data: newPost, error } = await supabase
-        .from("posts")
-        .insert({ content, image_url: imageUrl, user_id: user?.id })
-        .select(`*, profiles (username, avatar_url), likes (user_id)`)
-        .single();
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, imageUrl }),
+      });
 
-      if (error) throw error;
+      const newPost = await res.json();
       onPostCreated?.(newPost);
       setContent("");
       removeImage();
@@ -157,28 +144,24 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (!loading && !compressing && (content.trim() || image)) {
-        handleSubmit();
-      }
-    }
-  };
-
   return (
     <div className="rounded-xl bg-(--bg-secondary) p-4 space-y-3">
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        onKeyDown={handleKeyDown}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            if (!loading && !compressing && (content.trim() || image))
+              handleSubmit();
+          }
+        }}
         placeholder={tr.whatsOnYourMind}
         rows={3}
         className="w-full bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl p-3 resize-none focus:outline-none text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 transition-colors"
       />
 
       {imageError && <p className="text-xs text-red-400">{imageError}</p>}
-
       {compressing && (
         <p className="text-xs text-(--text-primary)/40">
           {tr.imageCompressing}
@@ -205,11 +188,7 @@ const CreatePost = ({ onPostCreated }: CreatePostProps) => {
 
       <div className="flex items-center justify-between">
         <label
-          className={`cursor-pointer flex items-center gap-1.5 text-sm transition-colors duration-200 ${
-            compressing
-              ? "text-(--text-primary)/20 pointer-events-none"
-              : "text-(--text-primary)/30 hover:text-(--text-primary)/60"
-          }`}
+          className={`cursor-pointer flex items-center gap-1.5 text-sm transition-colors duration-200 ${compressing ? "text-(--text-primary)/20 pointer-events-none" : "text-(--text-primary)/30 hover:text-(--text-primary)/60"}`}
         >
           <svg
             className="w-5 h-5"

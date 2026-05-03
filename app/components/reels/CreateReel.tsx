@@ -1,62 +1,44 @@
 "use client";
 
-import { useAuth } from "@/app/context/auth";
+import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
-import { createClient } from "@/app/lib/supabase/client";
 import { t } from "@/app/translation/translation";
 import { PlusCircleIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 const CreateReel = () => {
+  const { data: session } = useSession();
   const [isOpen, setIsOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const { lang } = useLang();
   const tr = t[lang];
-  const { user } = useAuth();
-  const supabase = createClient();
 
-  const handleUploadVideo = async () => {
-    if (!user || !file) return;
+  const handleUpload = async () => {
+    if (!session?.user?.id || !file) return;
     setLoading(true);
+
     try {
-      console.log("1. Начало загрузки", file.name, file.size, file.type);
+      const formData = new FormData();
+      formData.append("file", file);
 
-      const fileName = `${user?.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`;
-      console.log("2. Имя файла:", fileName);
+      const uploadRes = await fetch("/api/upload/video", {
+        method: "POST",
+        body: formData,
+      });
+      const { url } = await uploadRes.json();
 
-      const { error } = await supabase.storage
-        .from("videos")
-        .upload(fileName, file, { contentType: file.type, upsert: true });
-
-      console.log("3. Storage результат:", error ?? "успех");
-      if (error) throw new Error(error.message);
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("videos").getPublicUrl(fileName);
-      console.log("4. Public URL:", publicUrl);
-
-      const { error: dbError } = await supabase.from("videos").insert({
-        user_id: user.id,
-        video_url: publicUrl,
-        title: title,
-        description: description,
+      await fetch("/api/reels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url1080p: url }),
       });
 
-      console.log("5. DB результат:", dbError ?? "успех");
-      if (dbError) throw new Error(dbError.message);
-
-      console.log("6. Всё готово");
       setIsOpen(false);
       setFile(null);
       setPreview(null);
-      setTitle("");
-      setDescription("");
     } catch (err) {
       console.error("Ошибка:", err);
     } finally {
@@ -106,16 +88,14 @@ const CreateReel = () => {
               </button>
             </div>
 
-            {preview && (
+            {preview ? (
               <video
                 src={preview}
                 controls
                 muted
                 className="w-full h-64 rounded-xl"
               />
-            )}
-
-            {!preview && (
+            ) : (
               <button
                 onClick={() => inputRef.current?.click()}
                 className="w-full aspect-video rounded-xl border border-dashed border-(--border) bg-(--bg-primary) flex items-center justify-center text-xs text-(--text-primary)/30"
@@ -126,36 +106,20 @@ const CreateReel = () => {
 
             <input
               ref={inputRef}
+              type="file"
+              accept="video/*"
+              className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0] ?? null;
                 setFile(f);
                 if (f) setPreview(URL.createObjectURL(f));
               }}
-              type="file"
-              accept="video/*"
-              className="hidden"
-            />
-
-            <input
-              type="text"
-              value={title ?? ""}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder={tr.titleOptional}
-              className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none transition-colors"
-            />
-
-            <input
-              type="text"
-              value={description ?? ""}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={tr.descriptionOptional}
-              className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none transition-colors"
             />
 
             <button
-              onClick={handleUploadVideo}
-              disabled={loading}
-              className="w-full py-2.5 rounded-xl bg-(--bg-card) text-(--text-primary) text-xs font-semibold uppercase tracking-wider hover:opacity-80 transition-colors"
+              onClick={handleUpload}
+              disabled={loading || !file}
+              className="w-full py-2.5 rounded-xl bg-(--bg-card) text-(--text-primary) text-xs font-semibold uppercase tracking-wider hover:opacity-80 transition-colors disabled:opacity-30"
             >
               {loading ? tr.loading : tr.postReel}
             </button>

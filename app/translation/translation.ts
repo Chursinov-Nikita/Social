@@ -34,6 +34,11 @@ export const t = {
       "Are you sure you want to delete this comment? This action cannot be undone.",
     cancel: "Cancel",
     delete: "Delete",
+    deletePost: "Delete Post",
+    deletePostDesc:
+      "This action cannot be canceled. The post will be permanently deleted.",
+    deleting: "Deleting...",
+    you: "You",
 
     // Profile
     noName: "No name",
@@ -225,6 +230,10 @@ export const t = {
       "Вы уверены, что хотите удалить этот комментарий? Это действие нельзя отменить.",
     cancel: "Отмена",
     delete: "Удалить",
+    deletePost: "Удалить пост",
+    deletePostDesc: "Это действие нельзя отменить. Пост будет удалён навсегда.",
+    deleting: "Удаление...",
+    you: "Вы",
 
     // Profile
     noName: "Без имени",

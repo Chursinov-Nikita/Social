@@ -1,26 +1,23 @@
-export interface Message {
+export type Message = {
   id: string;
-  sender_id: string;
-  receiver_id: string;
+  senderId: string;
+  receiverId: string;
   content: string;
-  created_at: string;
   read: boolean;
-}
+  createdAt: string;
+};
 
-export interface ChatUser {
+export type ChatUser = {
   id: string;
-  username: string;
-  avatar_url: string | null;
-  lastMessage?: string;
-  lastMessageTime?: string;
-  unreadCount?: number;
-}
+  name: string | null;
+  image: string | null;
+};
 
 export type MessagePreview = {
   content: string;
-  created_at: string;
-  sender_id: string;
-  receiver_id: string;
+  createdAt: string;
+  senderId: string;
+  receiverId: string;
   read: boolean;
 };
 

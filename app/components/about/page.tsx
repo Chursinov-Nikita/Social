@@ -1,17 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useAuth } from "@/app/context/auth";
+import { useSession } from "next-auth/react";
 import { getFeatures, getValues } from "./values";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
 
 const About = () => {
-  const { user } = useAuth();
+  const { data: session } = useSession();
   const { lang } = useLang();
   const tr = t[lang];
   const features = getFeatures(tr);
   const values = getValues(tr);
+  const isLoggedIn = !!session?.user;
 
   return (
     <div className="relative min-h-screen bg-(--bg-primary) text-(--text-primary) overflow-hidden">
@@ -32,7 +33,7 @@ const About = () => {
           </p>
           <div className="flex items-center gap-4 mt-4">
             <Link
-              href={user ? "/" : "/components/login"}
+              href={isLoggedIn ? "/" : "/components/login"}
               className="px-8 py-3 rounded-full font-semibold text-sm bg-(--bg-card) text-(--text-primary) hover:opacity-80 transition-all duration-200 hover:scale-105"
             >
               {tr.getStarted}
@@ -78,7 +79,7 @@ const About = () => {
                 className="group bg-(--bg-primary) hover:bg-(--bg-secondary) p-10 transition-all duration-300"
               >
                 <div className="text-3xl mb-8">{feature.icon}</div>
-                <h3 className="text-lg font-bold mb-3 text-(--text-primary) transition-colors">
+                <h3 className="text-lg font-bold mb-3 text-(--text-primary)">
                   {feature.title}
                 </h3>
                 <p className="text-(--text-primary)/50 text-sm leading-relaxed">
@@ -102,7 +103,7 @@ const About = () => {
               >
                 <div className="text-2xl shrink-0 mt-1">{value.icon}</div>
                 <div>
-                  <h3 className="font-bold text-base mb-2 text-(--text-primary) transition-colors">
+                  <h3 className="font-bold text-base mb-2 text-(--text-primary)">
                     {value.title}
                   </h3>
                   <p className="text-(--text-primary)/50 text-sm leading-relaxed">
@@ -123,7 +124,7 @@ const About = () => {
             {tr.joinUs}
           </h2>
           <Link
-            href={user ? "/" : "/components/login"}
+            href={isLoggedIn ? "/" : "/components/login"}
             className="inline-flex items-center gap-3 px-12 py-3 rounded-full font-bold text-(--text-primary) bg-(--bg-card) hover:opacity-80 transition-all duration-200 hover:scale-105"
           >
             {tr.getStarted}

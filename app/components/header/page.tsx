@@ -1,20 +1,22 @@
 "use client";
 
-import { useAuth } from "@/app/context/auth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getLinks } from "./links";
-import useUnreadMessages from "@/app/hooks/useUnreadMessages";
-import useUnreadNotifications from "@/app/hooks/useUnreadNotification";
+import { useUnreadCounts } from "@/app/hooks/useUnreadCounts";
 import useTheme from "@/app/hooks/useTheme";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
+import { useSession } from "next-auth/react";
 
 const Header = () => {
-  const { user } = useAuth();
+  const { data: session } = useSession();
+  const user = session?.user ?? null;
   const pathname = usePathname();
-  const countUnreadMessages = useUnreadMessages();
-  const countUnreadNotifications = useUnreadNotifications();
+  const {
+    messages: countUnreadMessages,
+    notifications: countUnreadNotifications,
+  } = useUnreadCounts();
   const { toggle, theme } = useTheme();
   const { lang, toggle: toggleLang } = useLang();
   const tr = t[lang];
@@ -31,18 +33,16 @@ const Header = () => {
           NEBL
         </Link>
 
-        {/* Навигация по центру */}
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1">
           {links.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className={`relative px-4 py-1.5 rounded-xl text-sm transition-all duration-200
-                ${
-                  pathname === link.href
-                    ? "text-(--text-primary) bg-(--bg-card) font-extrabold"
-                    : "text-(--text-primary)/40 font-bold hover:text-(--text-primary) hover:bg-(--bg-card)"
-                }`}
+              className={`relative px-4 py-1.5 rounded-xl text-sm transition-all duration-200 ${
+                pathname === link.href
+                  ? "text-(--text-primary) bg-(--bg-card) font-extrabold"
+                  : "text-(--text-primary)/40 font-bold hover:text-(--text-primary) hover:bg-(--bg-card)"
+              }`}
             >
               {link.label}
 
@@ -96,15 +96,27 @@ const Header = () => {
               {tr.signIn}
             </Link>
           ) : (
-            <Link
-              href="/components/profile"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-all duration-200"
-            >
-              <div className="w-6 h-6 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary)">
-                {user.email?.[0].toUpperCase()}
-              </div>
-              {user.user_metadata?.name ?? tr.profile}
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/components/profile"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold text-(--text-primary)/60 hover:text-(--text-primary) hover:bg-(--bg-card) transition-all duration-200"
+              >
+                {user.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={user.image}
+                    alt="avatar"
+                    className="w-6 h-6 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary)">
+                    {user.name?.[0].toUpperCase() ??
+                      user.email?.[0].toUpperCase()}
+                  </div>
+                )}
+                {user.name ?? tr.profile}
+              </Link>
+            </div>
           )}
         </div>
       </nav>

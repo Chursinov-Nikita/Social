@@ -1,24 +1,29 @@
 export type FriendShipStatus = "pending" | "accepted" | "rejected";
 
-export interface Friendship {
+export type Friendship = {
   id: string;
-  sender_id: string;
-  receiver_id: string;
-  status: FriendShipStatus;
-  created_at: string;
-  profiles?: {
-    id: string;
-    username: string;
-    avatar_url: string | null;
-  };
-}
+  senderId: string;
+  receiverId: string;
+  status: string;
+  sender: FriendUser;
+};
 
-export type Tab = "friends" | "requests" | "search";
+export type FriendUser = {
+  id: string;
+  name: string | null;
+  image: string | null;
+};
 
 export type SearchUser = {
   id: string;
-  username: string;
+  name: string | null;
+  image: string | null;
   relationStatus: "none" | "pending" | "accepted";
 };
 
-export type FriendToRemove = { id: string; username?: string };
+export type FriendToRemove = {
+  id: string;
+  name: string | null;
+};
+
+export type Tab = "friends" | "requests" | "search";
