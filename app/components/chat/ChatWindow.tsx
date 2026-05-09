@@ -5,7 +5,8 @@ import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
 import type { ChatUser, Message } from "@/app/types/chat";
 import { useEffect, useRef, useState } from "react";
-import { socket } from "@/lib/socket";
+import { useOnlineStatus } from "@/app/hooks/useOnlineStatus";
+import Loading from "../loading/Loading";
 
 const PAGE_SIZE = 50;
 
@@ -22,6 +23,9 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const { onlineUsers, lastSeen } = useOnlineStatus([recipient.id]);
+  const isOnline = onlineUsers.has(recipient.id);
+
   // Загрузка сообщений
   useEffect(() => {
     if (!currentUserId) return;
@@ -35,7 +39,6 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
         setHasMore(data.length === PAGE_SIZE);
       });
 
-    // Отметить как прочитанные
     fetch("/api/chat/messages/read", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -43,34 +46,16 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
     });
   }, [recipient.id, currentUserId]);
 
-  // Socket.io — получение новых сообщений
   useEffect(() => {
     if (!currentUserId) return;
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/chat/messages?recipientId=${recipient.id}`);
+      const data: Message[] = await res.json();
+      setMessages(data);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [recipient.id, currentUserId]);
 
-    socket.emit("join", currentUserId);
-
-    const handler = (msg: Message) => {
-      const isRelevant =
-        (msg.senderId === currentUserId && msg.receiverId === recipient.id) ||
-        (msg.senderId === recipient.id && msg.receiverId === currentUserId);
-      if (isRelevant && msg.senderId !== currentUserId) {
-        setMessages((prev) => [...prev, msg]);
-        // Отметить как прочитанное
-        fetch("/api/chat/messages/read", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ senderId: recipient.id }),
-        });
-      }
-    };
-
-    socket.on("new_message", handler);
-    return () => {
-      socket.off("new_message", handler);
-    };
-  }, [currentUserId, recipient.id]);
-
-  // Скролл вниз при новых сообщениях
   useEffect(() => {
     const c = containerRef.current;
     if (c) c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
@@ -117,7 +102,6 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
       setMessages((prev) =>
         prev.map((m) => (m.id === optimistic.id ? saved : m)),
       );
-      socket.emit("send_message", saved);
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setContent(optimistic.content);
@@ -126,18 +110,51 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
     }
   };
 
+  const formatLastSeen = (dateStr: string) => {
+    if (!dateStr) return tr.online;
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMin = Math.floor((now.getTime() - date.getTime()) / 60000);
+
+    if (diffMin < 1) return "был(а) только что";
+    if (diffMin < 60) return `был(а) ${diffMin} мин. назад`;
+
+    const isToday = date.toDateString() === now.toDateString();
+    if (isToday) {
+      return `был(а) сегодня в ${date.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}`;
+    }
+    return `был(а) ${date.toLocaleDateString("ru", { day: "numeric", month: "long" })} в ${date.toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}`;
+  };
+
+  const statusText = isOnline
+    ? "в сети"
+    : lastSeen[recipient.id]
+      ? formatLastSeen(lastSeen[recipient.id])
+      : tr.online;
+
   return (
     <div className="flex flex-col h-full min-h-0 overflow-hidden bg-(--bg-primary)">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-(--border) bg-(--bg-secondary)">
-        <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold shrink-0 text-(--text-primary)">
-          {recipient.name?.[0].toUpperCase() ?? "?"}
+        <div className="relative shrink-0">
+          <div className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold text-(--text-primary)">
+            {recipient.name?.[0].toUpperCase() ?? "?"}
+          </div>
+          {isOnline && (
+            <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-(--bg-secondary) rounded-full" />
+          )}
         </div>
         <div>
           <p className="text-sm font-semibold text-(--text-primary)">
             {recipient.name}
           </p>
-          <p className="text-xs text-(--text-primary)/30">{tr.online}</p>
+          <p
+            className={`text-xs transition-colors ${
+              isOnline ? "text-green-500" : "text-(--text-primary)/30"
+            }`}
+          >
+            {statusText}
+          </p>
         </div>
       </div>
 
@@ -153,7 +170,7 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
               disabled={loadingOlder}
               className="text-xs px-3 py-1.5 rounded-full bg-(--bg-secondary) text-(--text-primary)/80 hover:bg-(--bg-card) disabled:opacity-40 transition-colors"
             >
-              {loadingOlder ? tr.loading : tr.loadOlderMessages}
+              {loadingOlder ? <Loading /> : tr.loadOlderMessages}
             </button>
           </div>
         )}
@@ -165,7 +182,11 @@ const ChatWindow = ({ recipient }: { recipient: ChatUser }) => {
               className={`flex ${isMe ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-xs px-3 py-2 rounded-2xl text-sm leading-relaxed text-(--text-primary) ${isMe ? "bg-(--bg-card) rounded-br-sm" : "bg-(--bg-secondary) rounded-bl-sm"}`}
+                className={`max-w-xs px-3 py-2 rounded-2xl text-sm leading-relaxed text-(--text-primary) ${
+                  isMe
+                    ? "bg-(--bg-card) rounded-br-sm"
+                    : "bg-(--bg-secondary) rounded-bl-sm"
+                }`}
               >
                 <p>{msg.content}</p>
                 <p className="text-[10px] mt-1 text-right text-(--text-primary)/30">

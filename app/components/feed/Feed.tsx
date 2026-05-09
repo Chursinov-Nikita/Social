@@ -6,6 +6,7 @@ import type { Post } from "@/app/types/feed";
 import { useState } from "react";
 import CreatePost from "./CreatePost";
 import PostCard from "./Post";
+import Loading from "../loading/Loading";
 
 const PAGE_SIZE = 10;
 
@@ -100,7 +101,7 @@ const Feed = ({ initialPosts = [] }: { initialPosts: Post[] }) => {
                   d="M4 12a8 8 0 018-8v8z"
                 />
               </svg>
-              {tr.loadingDots}
+              <Loading />
             </span>
           ) : !hasMore ? (
             tr.noMorePosts

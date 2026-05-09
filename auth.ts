@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "jwt" }, // нужно для Credentials
+  session: { strategy: "jwt" },
   providers: [
     Google({
       clientId: process.env.GOOGLE_ID!,
@@ -45,12 +45,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    jwt({ token, user }) {
-      if (user) token.id = user.id;
+    jwt({ token, user, trigger, session }) {
+      if (user) {
+        token.id = user.id;
+        token.picture = user.image;
+      }
+      // Обновляем аватар при вызове update()
+      if (trigger === "update" && session?.image) {
+        token.picture = session.image;
+      }
       return token;
     },
     session({ session, token }) {
       if (token?.id) session.user.id = token.id as string;
+      if (token?.picture) session.user.image = token.picture as string;
       return session;
     },
   },

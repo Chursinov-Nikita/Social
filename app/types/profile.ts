@@ -1,18 +1,16 @@
 export type UserPost = {
   id: string;
-  content: string | null;
-  image_url: string | null;
-  likes_count: number | null;
-  comments: [{ count: number }] | [];
-  created_at: string;
+  content: string;
+  imageUrl: string | null;
+  createdAt: string;
+  _count: { likes: number; comments: number };
 };
 
-export type UserReels = {
+export type UserReel = {
   id: string;
-  title: string;
-  video_url: string;
-  likes_count: number | null;
-  views_count: number;
-  created_at: string;
-  video_likes: { count: number }[];
+  url1080p: string;
+  thumbnail: string | null;
+  views: number;
+  createdAt: string;
+  _count: { likes: number };
 };

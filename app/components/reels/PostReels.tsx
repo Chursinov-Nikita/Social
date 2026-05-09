@@ -5,6 +5,7 @@ import type { Comment } from "@/app/types/feed";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { useInView } from "react-intersection-observer";
+import Loading from "../loading/Loading";
 
 type Props = {
   reel: Reel;
@@ -23,6 +24,8 @@ const PostReels = ({ reel, currentUserId }: Props) => {
   const [commentText, setCommentText] = useState("");
   const [loadingComments, setLoadingComments] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
+  const [views, setViews] = useState(reel.views);
+  const viewedRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const { ref, inView } = useInView({ threshold: 0.7 });
 
@@ -31,9 +34,18 @@ const PostReels = ({ reel, currentUserId }: Props) => {
   }, [currentUserId, reel.likes]);
 
   useEffect(() => {
-    if (inView && !paused) videoRef.current?.play();
-    else videoRef.current?.pause();
-  }, [inView, paused]);
+    if (inView && !paused) {
+      videoRef.current?.play();
+      // Считаем просмотр один раз
+      if (!viewedRef.current) {
+        viewedRef.current = true;
+        fetch(`/api/reels/${reel.id}/view`, { method: "POST" });
+        setViews((v) => v + 1);
+      }
+    } else {
+      videoRef.current?.pause();
+    }
+  }, [inView, paused, reel.id]);
 
   const handleVideoClick = () => {
     if (paused) {
@@ -151,14 +163,62 @@ const PostReels = ({ reel, currentUserId }: Props) => {
             e.stopPropagation();
             setMuted((p) => !p);
           }}
-          className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-sm text-base"
+          className="absolute top-4 right-4 z-10 w-7 h-7 rounded-full bg-black/40 flex items-center justify-center backdrop-blur-sm text-base"
         >
-          {muted ? "🔇" : "🔊"}
+          {muted ? (
+            // Звук выключен — перечёркнутый
+            <svg
+              className="w-4 h-4 text-white"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"
+              />
+            </svg>
+          ) : (
+            // Звук включен — с 2 полосками
+            <svg
+              className="w-4 h-4 text-white"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15.536 8.464a5 5 0 010 7.072"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M18.364 5.636a9 9 0 010 12.728"
+              />
+            </svg>
+          )}
         </button>
 
         {/* Info */}
         <div className="absolute bottom-6 left-4 right-14 z-10">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-1">
             {reel.author.image ? (
               <Image
                 src={reel.author.image}
@@ -220,103 +280,124 @@ const PostReels = ({ reel, currentUserId }: Props) => {
             </svg>
             <span className="text-white text-xs">{commentsCount}</span>
           </button>
-        </div>
-      </div>
 
-      {/* Шторка комментариев */}
-      {showComments && (
-        <div
-          className="absolute inset-0 z-20 flex items-end justify-center"
-          onClick={() => setShowComments(false)}
-        >
-          <div
-            className="bg-(--bg-secondary) rounded-t-2xl p-4 space-y-3 max-h-[60dvh] flex flex-col w-[calc((100dvh-80px)*9/16)]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-(--text-primary)">
-                Комментарии
-              </p>
-              <button
-                onClick={() => setShowComments(false)}
-                className="text-(--text-primary)/40 hover:text-(--text-primary)"
-              >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-3 [scrollbar-width:none]">
-              {loadingComments ? (
-                <p className="text-xs text-(--text-primary)/30 text-center py-4">
-                  Загрузка...
-                </p>
-              ) : comments.length === 0 ? (
-                <p className="text-xs text-(--text-primary)/30 text-center py-4">
-                  Нет комментариев
-                </p>
-              ) : (
-                comments.map((c) => (
-                  <div key={c.id} className="flex items-start gap-2">
-                    {c.author.image ? (
-                      <Image
-                        src={c.author.image}
-                        width={28}
-                        height={28}
-                        className="rounded-full object-cover shrink-0"
-                        alt={c.author.name ?? ""}
-                      />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary) shrink-0">
-                        {c.author.name?.[0].toUpperCase() ?? "?"}
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-xs font-medium text-(--text-primary)/70">
-                        {c.author.name}
-                      </p>
-                      <p className="text-xs text-(--text-primary)/50">
-                        {c.content}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            {currentUserId && (
-              <div className="flex gap-2 pt-2 border-t border-(--border)">
-                <input
-                  type="text"
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && sendComment()}
-                  placeholder="Написать комментарий..."
-                  className="flex-1 bg-(--bg-primary) border border-(--border) rounded-xl px-3 py-2 text-xs text-(--text-primary) placeholder:text-(--text-primary)/20 outline-none"
-                />
-                <button
-                  onClick={sendComment}
-                  disabled={sendingComment || !commentText.trim()}
-                  className="px-3 py-2 rounded-xl bg-(--bg-card) text-xs text-(--text-primary) disabled:opacity-30"
-                >
-                  →
-                </button>
-              </div>
-            )}
+          <div className="flex flex-col items-center gap-1">
+            <svg
+              className="w-7 h-7 text-white"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+              />
+            </svg>
+            <span className="text-white text-xs">{views}</span>
           </div>
         </div>
-      )}
+
+        {/* Шторка комментариев */}
+        {showComments && (
+          <div
+            className="absolute inset-0 z-20 flex items-end"
+            onClick={() => setShowComments(false)}
+          >
+            <div
+              className="w-full bg-(--bg-secondary) rounded-t-2xl p-4 space-y-3 max-h-[60%] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-(--text-primary)">
+                  Комментарии
+                </p>
+                <button
+                  onClick={() => setShowComments(false)}
+                  className="text-(--text-primary)/40 hover:text-(--text-primary)"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-3 [scrollbar-width:none]">
+                {loadingComments ? (
+                  <Loading />
+                ) : comments.length === 0 ? (
+                  <p className="text-xs text-(--text-primary)/30 text-center py-4">
+                    Нет комментариев
+                  </p>
+                ) : (
+                  comments.map((c) => (
+                    <div key={c.id} className="flex items-start gap-2">
+                      {c.author.image ? (
+                        <Image
+                          src={c.author.image}
+                          width={28}
+                          height={28}
+                          className="rounded-full object-cover shrink-0"
+                          alt={c.author.name ?? ""}
+                        />
+                      ) : (
+                        <div className="w-7 h-7 rounded-full bg-(--bg-card) flex items-center justify-center text-xs font-bold text-(--text-primary) shrink-0">
+                          {c.author.name?.[0].toUpperCase() ?? "?"}
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs font-medium text-(--text-primary)/70">
+                          {c.author.name}
+                        </p>
+                        <p className="text-xs text-(--text-primary)/50">
+                          {c.content}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {currentUserId && (
+                <div className="flex gap-2 pt-2 border-t border-(--border)">
+                  <input
+                    type="text"
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && sendComment()}
+                    placeholder="Написать комментарий..."
+                    className="flex-1 bg-(--bg-primary) border border-(--border) rounded-xl px-3 py-2 text-xs text-(--text-primary) placeholder:text-(--text-primary)/20 outline-none"
+                  />
+                  <button
+                    onClick={sendComment}
+                    disabled={sendingComment || !commentText.trim()}
+                    className="px-3 py-2 rounded-xl bg-(--bg-card) text-xs text-(--text-primary) disabled:opacity-30"
+                  >
+                    →
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

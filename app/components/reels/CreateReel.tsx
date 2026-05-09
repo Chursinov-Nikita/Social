@@ -5,6 +5,7 @@ import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
 import { PlusCircleIcon } from "lucide-react";
 import { useRef, useState } from "react";
+import Loading from "../loading/Loading";
 
 const CreateReel = () => {
   const { data: session } = useSession();
@@ -121,7 +122,7 @@ const CreateReel = () => {
               disabled={loading || !file}
               className="w-full py-2.5 rounded-xl bg-(--bg-card) text-(--text-primary) text-xs font-semibold uppercase tracking-wider hover:opacity-80 transition-colors disabled:opacity-30"
             >
-              {loading ? tr.loading : tr.postReel}
+              {loading ? <Loading /> : tr.postReel}
             </button>
           </div>
         </div>

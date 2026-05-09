@@ -91,9 +91,13 @@ const Login = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-xl bg-(--bg-card) hover:opacity-80 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full max-h-12 rounded-xl bg-(--bg-card) hover:opacity-80 py-2.5 text-sm font-semibold text-(--text-primary) transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? tr.loading : tr.signIn}
+                {loading ? (
+                  <div className="flex mx-auto w-4 h-4 border-2 border-(--text-primary)/20 border-t-(--text-primary)/60 rounded-full animate-spin" />
+                ) : (
+                  tr.signIn
+                )}
               </button>
             </form>
 

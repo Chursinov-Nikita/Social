@@ -1,5 +1,3 @@
-export type FriendShipStatus = "pending" | "accepted" | "rejected";
-
 export type Friendship = {
   id: string;
   senderId: string;
@@ -27,3 +25,5 @@ export type FriendToRemove = {
 };
 
 export type Tab = "friends" | "requests" | "search";
+
+export type FriendShipStatus = "pending" | "accepted" | "rejected";

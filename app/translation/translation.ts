@@ -99,6 +99,16 @@ export const t = {
     online: "online",
     selectUserToChat: "Select a user to start chatting",
 
+    // Chat folders
+    allChats: "All",
+    noChatsYet: "No chats yet",
+    noChatsInFolder: "No chats in this folder",
+    newFolder: "New folder",
+    folderName: "Folder name",
+    createFolder: "Create",
+    folders: "Folders",
+    deleteFolder: "delete",
+
     // Auth
     yourWorld: "Your world,",
     yourRules: "your rules.",
@@ -293,6 +303,16 @@ export const t = {
     loadOlderMessages: "Загрузить старые сообщения",
     online: "онлайн",
     selectUserToChat: "Выберите пользователя для начала чата",
+
+    // Chat folders
+    allChats: "Все",
+    noChatsYet: "Чатов пока нет",
+    noChatsInFolder: "Нет чатов в этой папке",
+    newFolder: "Новая папка",
+    folderName: "Название папки",
+    createFolder: "Создать",
+    folders: "Папки",
+    deleteFolder: "удалить",
 
     // Auth
     yourWorld: "Твой мир,",

@@ -2,114 +2,19 @@
 
 import LogOut from "@/app/components/logout/page";
 import { useLang } from "@/app/context/language";
-import { t, Translation } from "@/app/translation/translation";
-import { Copy, Eye, Heart, MessageCircle } from "lucide-react";
+import { t } from "@/app/translation/translation";
+import { Copy } from "lucide-react";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { UserPost, UserReel } from "../../types/profile";
+import PostCard from "./PostCard";
+import ReelCard from "./ReelCard";
+import Empty from "./Empty";
 
-// ── Types ──
-type UserPost = {
-  id: string;
-  content: string;
-  imageUrl: string | null;
-  createdAt: string;
-  _count: { likes: number; comments: number };
-};
-
-type UserReel = {
-  id: string;
-  url1080p: string;
-  thumbnail: string | null;
-  views: number;
-  createdAt: string;
-  _count: { likes: number };
-};
-
-// ── Sub-components ──
-const Empty = ({ label }: { label: string }) => (
-  <div className="rounded-xl border border-dashed border-(--border) p-8 text-center text-sm text-(--text-primary)/20">
-    {label}
-  </div>
-);
-
-const PostCard = ({ post, tr }: { post: UserPost; tr: Translation }) => (
-  <article className="rounded-xl border border-(--border) bg-(--bg-primary) p-3">
-    {post.imageUrl && (
-      <div className="relative mb-3 h-36 overflow-hidden rounded-xl border border-(--border)">
-        <Image
-          src={post.imageUrl}
-          alt="Post image"
-          fill
-          className="object-cover"
-        />
-      </div>
-    )}
-    <p className="line-clamp-2 text-sm leading-relaxed text-(--text-primary)/70">
-      {post.content?.trim() || (post.imageUrl ? tr.imagePost : tr.noText)}
-    </p>
-    <div className="mt-3 flex items-center gap-4 text-[10px] font-medium uppercase tracking-wider">
-      <span className="inline-flex items-center gap-1 text-(--text-primary)/50">
-        <Heart size={11} strokeWidth={1.5} />
-        {post._count.likes}
-      </span>
-      <span className="inline-flex items-center gap-1 text-(--text-primary)/50">
-        <MessageCircle size={11} strokeWidth={1.5} />
-        {post._count.comments}
-      </span>
-      <span className="ml-auto tabular-nums text-(--text-primary)/30">
-        {new Date(post.createdAt).toLocaleDateString()}
-      </span>
-    </div>
-  </article>
-);
-
-const ReelCard = ({ reel }: { reel: UserReel }) => (
-  <article className="group relative aspect-9/16 overflow-hidden rounded-xl border border-(--border) bg-(--bg-card)">
-    <video
-      src={reel.url1080p}
-      preload="metadata"
-      muted
-      playsInline
-      className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-      onMouseEnter={(e) => void e.currentTarget.play()}
-      onMouseLeave={(e) => {
-        e.currentTarget.pause();
-        e.currentTarget.currentTime = 0;
-      }}
-    />
-    <div className="absolute inset-0 bg-linear-to-t from-black/70 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-    <div className="absolute inset-0 flex items-center justify-center opacity-40 transition-opacity group-hover:opacity-0">
-      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm">
-        <svg
-          className="h-3 w-3 translate-x-px text-white"
-          fill="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path d="M8 5v14l11-7z" />
-        </svg>
-      </div>
-    </div>
-    <div className="absolute bottom-0 left-0 right-0 translate-y-1 p-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-      <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-0.5 text-[9px] text-white/70">
-          <Heart size={8} strokeWidth={2} /> {reel._count.likes}
-        </span>
-        <span className="inline-flex items-center gap-0.5 text-[9px] text-white/70">
-          <Eye size={8} strokeWidth={2} /> {reel.views}
-        </span>
-        <span className="ml-auto text-[8px] tabular-nums text-white/40">
-          {new Date(reel.createdAt).toLocaleDateString()}
-        </span>
-      </div>
-    </div>
-  </article>
-);
-
-// ── Main ──
 const Profile = () => {
-  const { data: session, status } = useSession();
+  const { data: session, status, update } = useSession();
   const { lang } = useLang();
   const tr = t[lang];
   const router = useRouter();
@@ -124,6 +29,7 @@ const Profile = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"reels" | "posts">("reels");
   const [emailCopied, setEmailCopied] = useState(false);
+  const [avatarLoading, setAvatarLoading] = useState(false);
 
   const user = session?.user;
 
@@ -184,6 +90,30 @@ const Profile = () => {
     setTimeout(() => setEmailCopied(false), 1400);
   };
 
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarLoading(true);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/profile/avatar", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.url) {
+        await update({ image: data.url });
+      }
+    } catch (err) {
+      console.error("Ошибка загрузки аватара:", err);
+    } finally {
+      setAvatarLoading(false);
+    }
+  };
+
   const handleSaveName = async () => {
     const next = nameDraft.trim();
     if (next.length < 2) {
@@ -228,19 +158,71 @@ const Profile = () => {
         <div className="rounded-2xl border border-(--border) bg-(--bg-secondary) p-6 space-y-6">
           {/* Header */}
           <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-(--border) bg-(--bg-card) text-lg font-semibold text-(--text-primary)/60">
+            {/* Аватар с загрузкой */}
+            <label className="relative flex h-14 w-14 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-(--border) bg-(--bg-card) text-lg font-semibold text-(--text-primary)/60 overflow-hidden group">
               {user.image ? (
                 <Image
                   src={user.image}
                   width={56}
                   height={56}
-                  className="rounded-xl object-cover"
+                  className="rounded-xl object-cover w-14 h-14"
                   alt="avatar"
                 />
               ) : (
                 initials
               )}
-            </div>
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-xl">
+                {avatarLoading ? (
+                  <svg
+                    className="w-4 h-4 text-white animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8v8z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="w-4 h-4 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  </svg>
+                )}
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarChange}
+                disabled={avatarLoading}
+              />
+            </label>
+
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-(--text-primary)">
                 {name || tr.noName}
@@ -252,6 +234,7 @@ const Profile = () => {
                 {achievement}
               </p>
             </div>
+
             <button
               onClick={() => {
                 setNameDraft(name);

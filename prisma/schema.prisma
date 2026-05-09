@@ -30,6 +30,9 @@ model User {
   createdAt DateTime @default(now())
   sentRequests     Friendship[] @relation("sent")
   receivedRequests Friendship[] @relation("received")
+  lastActiveAt DateTime?
+  lastSeen DateTime?
+  chatFolders ChatFolder[]
 }
 
 model Account {
@@ -136,6 +139,23 @@ model Message {
 
   @@index([senderId])
   @@index([receiverId])
+}
+
+model ChatFolder {
+  id        String             @id @default(cuid())
+  userId    String
+  name      String
+  position  Int                @default(0)
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  members   ChatFolderMember[]
+  createdAt DateTime           @default(now())
+}
+
+model ChatFolderMember {
+  id          String     @id @default(cuid())
+  folderId    String
+  companionId String
+  folder      ChatFolder @relation(fields: [folderId], references: [id], onDelete: Cascade)
 }
 
 model Notification {

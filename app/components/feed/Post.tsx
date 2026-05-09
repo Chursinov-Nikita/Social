@@ -12,6 +12,7 @@ import {
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Loading from "../loading/Loading";
 
 // In-memory кэш комментариев
 const MAX_CACHE = 50;
@@ -280,9 +281,7 @@ const PostCard = ({
             <div className="h-px bg-(--border)" />
             <div className="space-y-3 max-h-48 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]">
               {loadingComments ? (
-                <p className="text-xs text-(--text-primary)/20 text-center py-2">
-                  {tr.loadingComments}
-                </p>
+                <Loading />
               ) : comments.length === 0 ? (
                 <p className="text-xs text-(--text-primary)/20 text-center py-2">
                   {tr.noCommentsYet}
