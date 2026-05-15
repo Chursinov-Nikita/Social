@@ -13,7 +13,7 @@ const Chat = () => {
   const tr = t[lang];
 
   return (
-    <div className="min-h-screen bg-(--bg-primary) text-(--text-primary)">
+    <div className="min-h-screen bg-(--bg-primary) text-(--text-primary) fixed top-15 w-full">
       <div className="max-w-5xl mx-auto px-4 py-6 h-[calc(100vh-5rem)] flex flex-col">
         <div className="flex-1 flex rounded-xl overflow-hidden min-h-0 border border-(--border)">
           <div className="w-64 bg-(--bg-secondary) border-r border-(--border) shrink-0">
@@ -21,7 +21,11 @@ const Chat = () => {
           </div>
           <div className="flex-1 bg-(--bg-secondary)">
             {selectedUser ? (
-              <ChatWindow key={selectedUser.id} recipient={selectedUser} />
+              <ChatWindow
+                key={selectedUser.id}
+                recipient={selectedUser}
+                onChatDeleted={() => setSelectedUser(null)}
+              />
             ) : (
               <div className="h-full flex items-center justify-center text-(--text-primary)/20 text-sm">
                 {tr.selectUserToChat}

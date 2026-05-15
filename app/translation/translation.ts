@@ -98,6 +98,13 @@ export const t = {
     loadOlderMessages: "Load older messages",
     online: "online",
     selectUserToChat: "Select a user to start chatting",
+    goToProfile: "Go to profile",
+    deleteMyMessages: "Delete my messages",
+    deleteAllMessages: "Delete all messages",
+    deleteChat: "Delete chat",
+    deleteMineDesc: "All your messages in this chat will be deleted.",
+    deleteAllDesc: "All messages will be deleted for both participants.",
+    deleteChatDesc: "All messages will be deleted and the chat will close.",
 
     // Chat folders
     allChats: "All",
@@ -303,6 +310,13 @@ export const t = {
     loadOlderMessages: "Загрузить старые сообщения",
     online: "онлайн",
     selectUserToChat: "Выберите пользователя для начала чата",
+    goToProfile: "Перейти к профилю",
+    deleteMyMessages: "Удалить мои сообщения",
+    deleteAllMessages: "Удалить все сообщения",
+    deleteChat: "Удалить чат",
+    deleteMineDesc: "Все ваши сообщения в этом чате будут удалены.",
+    deleteAllDesc: "Все сообщения будут удалены для обоих участников.",
+    deleteChatDesc: "Все сообщения будут удалены и чат закроется.",
 
     // Chat folders
     allChats: "Все",

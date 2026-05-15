@@ -33,6 +33,7 @@ model User {
   lastActiveAt DateTime?
   lastSeen DateTime?
   chatFolders ChatFolder[]
+  userKey    UserKey?
 }
 
 model Account {
@@ -187,4 +188,22 @@ model Reel {
 
   @@index([authorId])
   @@index([createdAt])
+}
+
+model UserKey {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  publicKey String   // RSA публичный ключ
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model SenderKey {
+  id               String   @id @default(cuid())
+  senderId         String   // кто создал ключ
+  recipientId      String   // для кого зашифрован
+  encryptedKey     String   // AES ключ, зашифрованный RSA публичным ключом получателя
+  createdAt        DateTime @default(now())
+
+  @@unique([senderId, recipientId])
 }

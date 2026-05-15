@@ -7,6 +7,7 @@ import type { ChatUser, MessagePreview, Folder, Props } from "@/app/types/chat";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOnlineStatus } from "@/app/hooks/useOnlineStatus";
+import { decryptPreview } from "@/lib/e2ee";
 
 const UserList = ({ onSelect, selected }: Props) => {
   const { data: session } = useSession();
@@ -24,6 +25,9 @@ const UserList = ({ onSelect, selected }: Props) => {
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [decryptedPreviews, setDecryptedPreviews] = useState<
+    Record<string, string>
+  >({});
 
   const userIds = users.map((u) => u.id);
   const { onlineUsers } = useOnlineStatus(userIds);
@@ -34,6 +38,26 @@ const UserList = ({ onSelect, selected }: Props) => {
     setPreviews(data.previews ?? {});
     setUnread(data.unread ?? {});
   }, []);
+
+  useEffect(() => {
+    if (!session?.user?.id || !Object.keys(previews).length) return;
+
+    const decryptAll = async () => {
+      const result: Record<string, string> = {};
+      await Promise.all(
+        Object.entries(previews).map(async ([userId, preview]) => {
+          result[userId] = await decryptPreview(
+            preview.content,
+            preview.senderId,
+            session?.user?.id || "",
+          );
+        }),
+      );
+      setDecryptedPreviews(result);
+    };
+
+    void decryptAll();
+  }, [previews, session?.user?.id]);
 
   const loadFolders = useCallback(async () => {
     const res = await fetch("/api/chat/folders");
@@ -247,9 +271,11 @@ const UserList = ({ onSelect, selected }: Props) => {
                         <p
                           className={`text-xs truncate mt-0.5 ${(unread[u.id] ?? 0) > 0 ? "text-(--text-primary)/60 font-medium" : "text-(--text-primary)/30"}`}
                         >
-                          {previews[u.id]?.senderId === session?.user?.id
-                            ? `Вы: ${previews[u.id]?.content}`
-                            : (previews[u.id]?.content ?? tr.clickToChat)}
+                          {previews[u.id]
+                            ? previews[u.id].senderId === session?.user?.id
+                              ? `Вы: ${decryptedPreviews[u.id] ?? "🔒"}`
+                              : (decryptedPreviews[u.id] ?? "🔒")
+                            : tr.clickToChat}
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">

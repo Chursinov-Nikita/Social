@@ -13,6 +13,7 @@ const nunito = Nunito({
 
 export const metadata: Metadata = {
   title: "NEBL",
+  icons: "/icon.svg",
   description: "Speaking with everyone",
 };
 

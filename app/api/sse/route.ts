@@ -6,22 +6,30 @@ export async function GET() {
   if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
 
   const userId = session.user.id;
+  let closed = false;
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = (data: object) => {
-        controller.enqueue(`data: ${JSON.stringify(data)}\n\n`);
+        if (closed) return;
+        try {
+          controller.enqueue(`data: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          closed = true;
+        }
       };
 
-      // Сразу отправляем текущие счётчики
       const [messages, notifications] = await Promise.all([
         prisma.message.count({ where: { receiverId: userId, read: false } }),
         prisma.notification.count({ where: { userId, read: false } }),
       ]);
       send({ messages, notifications });
 
-      // Проверяем каждые 2 секунды
       const interval = setInterval(async () => {
+        if (closed) {
+          clearInterval(interval);
+          return;
+        }
         try {
           const [messages, notifications] = await Promise.all([
             prisma.message.count({
@@ -32,12 +40,14 @@ export async function GET() {
           send({ messages, notifications });
         } catch {
           clearInterval(interval);
-          controller.close();
+          closed = true;
         }
       }, 2000);
 
-      // Закрываем при дисконнекте
-      return () => clearInterval(interval);
+      return () => {
+        closed = true;
+        clearInterval(interval);
+      };
     },
   });
 

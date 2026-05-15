@@ -31,3 +31,5 @@ export type Props = {
   onSelect: (user: ChatUser) => void;
   selected: ChatUser | null;
 };
+
+export type DeleteMode = "mine" | "all" | "chat" | null;
