@@ -1,12 +1,12 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
 import { useUnreadCounts } from "@/app/hooks/useUnreadCounts";
 import { t } from "@/app/translation/translation";
 import type { Notification } from "@/app/types/notifications";
+import { Loader2 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
-import Loading from "../loading/Loading";
 
 type NotificationWithFriendship = Notification & {
   friendshipId: string | null;
@@ -117,7 +117,10 @@ const Notifications = () => {
         </div>
 
         {loading ? (
-          <Loading />
+          <span className="flex items-center gap-2">
+            <Loader2 className="w-4.5 h-4.5 animate-spin" />
+            {tr.loading}
+          </span>
         ) : notifications.length === 0 ? (
           <div className="text-center py-12 text-(--text-primary)/20 text-sm">
             {tr.noNotificationsYet}

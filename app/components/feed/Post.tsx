@@ -10,9 +10,9 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
+import { Loader2 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
-import Loading from "../loading/Loading";
 
 // In-memory кэш комментариев
 const MAX_CACHE = 50;
@@ -281,7 +281,10 @@ const PostCard = ({
             <div className="h-px bg-(--border)" />
             <div className="space-y-3 max-h-48 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]">
               {loadingComments ? (
-                <Loading />
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4.5 h-4.5 animate-spin" />
+                  {tr.loadingComments}
+                </span>
               ) : comments.length === 0 ? (
                 <p className="text-xs text-(--text-primary)/20 text-center py-2">
                   {tr.noCommentsYet}
@@ -389,26 +392,10 @@ const PostCard = ({
               >
                 {deletingPost ? (
                   <>
-                    <svg
-                      className="w-3.5 h-3.5 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v8z"
-                      />
-                    </svg>
-                    {tr.deleting ?? "Удаление..."}
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4.5 h-4.5 animate-spin" />
+                      {tr.deleting}
+                    </span>
                   </>
                 ) : (
                   tr.delete

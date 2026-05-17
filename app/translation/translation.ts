@@ -102,6 +102,9 @@ export const t = {
     deleteMyMessages: "Delete my messages",
     deleteAllMessages: "Delete all messages",
     deleteChat: "Delete chat",
+    deleteThisMessage: "Delete this message",
+    deleteThisMessageDesc:
+      "This message will be deleted permanently. Continue?",
     deleteMineDesc: "All your messages in this chat will be deleted.",
     deleteAllDesc: "All messages will be deleted for both participants.",
     deleteChatDesc: "All messages will be deleted and the chat will close.",
@@ -314,6 +317,8 @@ export const t = {
     deleteMyMessages: "Удалить мои сообщения",
     deleteAllMessages: "Удалить все сообщения",
     deleteChat: "Удалить чат",
+    deleteThisMessage: "Удалить это сообщение",
+    deleteThisMessageDesc: "Сообщение будет удалено безвозвратно. Продолжить?",
     deleteMineDesc: "Все ваши сообщения в этом чате будут удалены.",
     deleteAllDesc: "Все сообщения будут удалены для обоих участников.",
     deleteChatDesc: "Все сообщения будут удалены и чат закроется.",

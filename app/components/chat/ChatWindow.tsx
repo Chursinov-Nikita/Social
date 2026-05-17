@@ -1,15 +1,22 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
+import { useE2EE } from "@/app/hooks/useE2EE";
+import { useOnlineStatus } from "@/app/hooks/useOnlineStatus";
 import { t } from "@/app/translation/translation";
 import type { ChatUser, Message } from "@/app/types/chat";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useOnlineStatus } from "@/app/hooks/useOnlineStatus";
-import { useE2EE } from "@/app/hooks/useE2EE";
 import { DeleteMode } from "@/app/types/chat";
-import { EllipsisVertical, Trash2, UserCircle, XCircle } from "lucide-react";
+import {
+  EllipsisVertical,
+  Loader2,
+  SendHorizontal,
+  Trash2,
+  UserCircle,
+  XCircle,
+} from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const PAGE_SIZE = 50;
 
@@ -35,6 +42,10 @@ const ChatWindow = ({
   const [deleteMode, setDeleteMode] = useState<DeleteMode>(null);
   const [deleting, setDeleting] = useState(false);
   const [hoveredMsg, setHoveredMsg] = useState<string | null>(null);
+  const [pendingDeleteMsgId, setPendingDeleteMsgId] = useState<string | null>(
+    null,
+  );
+  const [deletingMsg, setDeletingMsg] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -169,11 +180,19 @@ const ChatWindow = ({
     }
   };
 
-  // Удалить одно сообщение
-  const deleteMessage = async (msgId: string) => {
-    await fetch(`/api/chat/messages/${msgId}`, { method: "DELETE" });
-    setDecryptedMessages((prev) => prev.filter((m) => m.id !== msgId));
-    setMessages((prev) => prev.filter((m) => m.id !== msgId));
+  // Удалить одно сообщение — с подтверждением
+  const confirmDeleteMessage = async () => {
+    if (!pendingDeleteMsgId) return;
+    setDeletingMsg(true);
+    await fetch(`/api/chat/messages/${pendingDeleteMsgId}`, {
+      method: "DELETE",
+    });
+    setDecryptedMessages((prev) =>
+      prev.filter((m) => m.id !== pendingDeleteMsgId),
+    );
+    setMessages((prev) => prev.filter((m) => m.id !== pendingDeleteMsgId));
+    setPendingDeleteMsgId(null);
+    setDeletingMsg(false);
   };
 
   // Удалить все/свои/чат
@@ -291,7 +310,7 @@ const ChatWindow = ({
               <button
                 className="w-full flex items-center gap-2 px-3 py-2 text-xs text-(--text-primary)/70 hover:bg-(--bg-card) rounded-lg transition-colors text-left"
                 onClick={() => {
-                  router.push(`/profile/${recipient.id}`);
+                  router.push(`/components/profile/${recipient.id}`);
                   setShowMenu(false);
                 }}
               >
@@ -364,22 +383,10 @@ const ChatWindow = ({
                 {/* Кнопка удаления — только для своих */}
                 {isMe && hoveredMsg === msg.id && (
                   <button
-                    onClick={() => deleteMessage(msg.id)}
+                    onClick={() => setPendingDeleteMsgId(msg.id)}
                     className="w-6 h-6 rounded-full bg-(--bg-secondary) flex items-center justify-center text-(--text-primary)/30 hover:text-red-400 transition-colors mb-1 shrink-0"
                   >
-                    <svg
-                      className="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 )}
                 <div
@@ -420,25 +427,55 @@ const ChatWindow = ({
             disabled={loading || !content.trim()}
             className="p-2.5 rounded-xl bg-(--bg-card) hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
           >
-            <svg
-              className="w-5 h-5 ml-1 text-(--text-primary)"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              transform="rotate(90)"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-              />
-            </svg>
+            <SendHorizontal className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      {/* Модалка подтверждения */}
+      {/* Модалка подтверждения удаления одного сообщения */}
+      {pendingDeleteMsgId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => !deletingMsg && setPendingDeleteMsgId(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-(--text-primary)">
+              {tr.deleteThisMessage}
+            </h2>
+            <p className="mt-2 text-sm text-(--text-primary)/60">
+              {tr.deleteThisMessageDesc}
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setPendingDeleteMsgId(null)}
+                disabled={deletingMsg}
+                className="px-3 py-1.5 rounded-lg text-sm text-(--text-primary)/60 hover:bg-(--bg-card) transition-colors disabled:opacity-40"
+              >
+                {tr.cancel}
+              </button>
+              <button
+                onClick={confirmDeleteMessage}
+                disabled={deletingMsg}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium text-white bg-red-500/80 hover:bg-red-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {deletingMsg ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {tr.deleting}
+                  </>
+                ) : (
+                  tr.delete
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модалка подтверждения массового удаления */}
       {deleteMode && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
@@ -469,26 +506,8 @@ const ChatWindow = ({
               >
                 {deleting ? (
                   <>
-                    <svg
-                      className="w-3.5 h-3.5 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v8z"
-                      />
-                    </svg>
-                    Удаление...
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    {tr.deleting}
                   </>
                 ) : (
                   tr.delete

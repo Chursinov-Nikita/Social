@@ -1,13 +1,14 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
+import { useOnlineStatus } from "@/app/hooks/useOnlineStatus";
 import { t } from "@/app/translation/translation";
-import type { ChatUser, MessagePreview, Folder, Props } from "@/app/types/chat";
+import type { ChatUser, Folder, MessagePreview, Props } from "@/app/types/chat";
+import { decryptPreview } from "@/lib/e2ee";
+import { Check, Plus } from "lucide-react";
+import { useSession } from "next-auth/react";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useOnlineStatus } from "@/app/hooks/useOnlineStatus";
-import { decryptPreview } from "@/lib/e2ee";
 
 const UserList = ({ onSelect, selected }: Props) => {
   const { data: session } = useSession();
@@ -196,19 +197,7 @@ const UserList = ({ onSelect, selected }: Props) => {
           onClick={() => setIsCreateOpen(true)}
           className="shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-(--text-primary)/30 hover:text-(--text-primary) hover:bg-(--bg-secondary) transition-colors"
         >
-          <svg
-            className="w-3.5 h-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
+          <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
 
@@ -315,19 +304,7 @@ const UserList = ({ onSelect, selected }: Props) => {
                       >
                         <span className="flex-1 text-left">{folder.name}</span>
                         {isInFolder(folder.id, u.id) && (
-                          <svg
-                            className="w-3.5 h-3.5 text-green-500"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
+                          <Check className="w-3.5 h-3.5 text-green-500" />
                         )}
                       </button>
                     ))}

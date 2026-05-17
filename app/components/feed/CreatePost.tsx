@@ -1,8 +1,9 @@
 "use client";
-import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
 import type { Post } from "@/app/types/feed";
+import { ImagePlus, Loader2 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 
 const MAX_RAW_SIZE_MB = 20;
@@ -190,19 +191,7 @@ const CreatePost = ({
         <label
           className={`cursor-pointer flex items-center gap-1.5 text-sm transition-colors duration-200 ${compressing ? "text-(--text-primary)/20 pointer-events-none" : "text-(--text-primary)/30 hover:text-(--text-primary)/60"}`}
         >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M14 8h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-            />
-          </svg>
+          <ImagePlus className="w-5 h-5" strokeWidth={1} />
           {tr.photo}
           <input
             type="file"
@@ -221,25 +210,7 @@ const CreatePost = ({
         >
           {loading ? (
             <span className="flex items-center gap-2">
-              <svg
-                className="w-4 h-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8v8z"
-                />
-              </svg>
+              <Loader2 className="w-4.5 h-4.5 animate-spin" />
               {tr.posting}
             </span>
           ) : (

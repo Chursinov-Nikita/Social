@@ -1,12 +1,12 @@
 "use client";
-import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
 import type { Post } from "@/app/types/feed";
+import { Loader2 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useState } from "react";
 import CreatePost from "./CreatePost";
 import PostCard from "./Post";
-import Loading from "../loading/Loading";
 
 const PAGE_SIZE = 10;
 
@@ -82,26 +82,8 @@ const Feed = ({ initialPosts = [] }: { initialPosts: Post[] }) => {
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
-              <svg
-                className="w-4 h-4 animate-spin"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8v8z"
-                />
-              </svg>
-              <Loading />
+              <Loader2 className="w-4.5 h-4.5 animate-spin" />
+              {tr.loading}
             </span>
           ) : !hasMore ? (
             tr.noMorePosts

@@ -1,11 +1,10 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useLang } from "@/app/context/language";
 import { t } from "@/app/translation/translation";
-import { PlusCircleIcon } from "lucide-react";
+import { Loader2, PlusCircleIcon, X } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useRef, useState } from "react";
-import Loading from "../loading/Loading";
 
 const CreateReel = () => {
   const { data: session } = useSession();
@@ -62,7 +61,7 @@ const CreateReel = () => {
           onClick={() => setIsOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 space-y-4"
+            className="w-full max-w-md rounded-2xl border border-(--border) bg-(--bg-primary) p-5 space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -73,19 +72,7 @@ const CreateReel = () => {
                 onClick={() => setIsOpen(false)}
                 className="text-(--text-primary)/40 hover:text-(--text-primary) transition-colors"
               >
-                <svg
-                  className="w-5 h-5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
+                <X className="w-5 h-5" />
               </button>
             </div>
 
@@ -99,7 +86,7 @@ const CreateReel = () => {
             ) : (
               <button
                 onClick={() => inputRef.current?.click()}
-                className="w-full aspect-video rounded-xl border border-dashed border-(--border) bg-(--bg-primary) flex items-center justify-center text-xs text-(--text-primary)/30"
+                className="w-full aspect-video rounded-xl border border-dashed border-(--border) bg-(--bg-secondary) flex items-center justify-center text-xs text-(--text-primary)/30"
               >
                 {tr.clickToSelectVideo}
               </button>
@@ -122,7 +109,14 @@ const CreateReel = () => {
               disabled={loading || !file}
               className="w-full py-2.5 rounded-xl bg-(--bg-card) text-(--text-primary) text-xs font-semibold uppercase tracking-wider hover:opacity-80 transition-colors disabled:opacity-30"
             >
-              {loading ? <Loading /> : tr.postReel}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-4.5 h-4.5 animate-spin" />
+                  {tr.uploading}
+                </span>
+              ) : (
+                tr.postReel
+              )}
             </button>
           </div>
         </div>

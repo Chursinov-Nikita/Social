@@ -1,13 +1,15 @@
 "use client";
 
+import { useLang } from "@/app/context/language";
+import useTheme from "@/app/hooks/useTheme";
+import { useUnreadCounts } from "@/app/hooks/useUnreadCounts";
+import { t } from "@/app/translation/translation";
+import { MoonIcon } from "@heroicons/react/24/solid";
+import { SunIcon } from "lucide-react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getLinks } from "./links";
-import { useUnreadCounts } from "@/app/hooks/useUnreadCounts";
-import useTheme from "@/app/hooks/useTheme";
-import { useLang } from "@/app/context/language";
-import { t } from "@/app/translation/translation";
-import { useSession } from "next-auth/react";
 
 const Header = () => {
   const { data: session } = useSession();
@@ -78,13 +80,9 @@ const Header = () => {
             className="w-8 h-8 rounded-xl flex items-center justify-center text-(--text-primary)/40 hover:text-(--text-primary) hover:bg-(--bg-card) transition-all duration-200"
           >
             {theme === "dark" ? (
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z" />
-              </svg>
+              <MoonIcon className="w-4 h-4" />
             ) : (
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 7a5 5 0 1 0 0 10A5 5 0 0 0 12 7zM2 13h2a1 1 0 0 0 0-2H2a1 1 0 0 0 0 2zm18 0h2a1 1 0 0 0 0-2h-2a1 1 0 0 0 0 2zM11 2v2a1 1 0 0 0 2 0V2a1 1 0 0 0-2 0zm0 18v2a1 1 0 0 0 2 0v-2a1 1 0 0 0-2 0zM5.99 4.58a1 1 0 0 0-1.41 1.41l1.06 1.06a1 1 0 0 0 1.41-1.41L5.99 4.58zm12.37 12.37a1 1 0 0 0-1.41 1.41l1.06 1.06a1 1 0 0 0 1.41-1.41l-1.06-1.06zm1.06-10.96a1 1 0 0 0-1.41-1.41l-1.06 1.06a1 1 0 0 0 1.41 1.41l1.06-1.06zM7.05 18.36a1 1 0 0 0-1.41-1.41l-1.06 1.06a1 1 0 0 0 1.41 1.41l1.06-1.06z" />
-              </svg>
+              <SunIcon className="w-4 h-4" />
             )}
           </button>
 
