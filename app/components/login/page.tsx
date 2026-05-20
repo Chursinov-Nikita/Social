@@ -134,7 +134,6 @@ const Login = () => {
                 </svg>
                 Google
               </button>
-
               <button
                 onClick={() => signIn("github", { callbackUrl: "/" })}
                 className="flex items-center justify-center gap-2 rounded-xl bg-(--bg-card) hover:opacity-80 py-2.5 text-xs font-medium text-(--text-primary)/50 hover:text-(--text-primary) transition-colors"
