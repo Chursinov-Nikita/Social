@@ -1,35 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// lib/e2ee.ts — End-to-End Encryption (RSA-OAEP + AES-GCM + Sender Key model)
+// lib/e2ee.ts
 // ─────────────────────────────────────────────────────────────────────────────
-//
-// Схема:
-//   • Каждый пользователь имеет RSA-2048 пару: приватный ключ — только в localStorage,
-//     публичный — на сервере (открыто).
-//   • Для каждого диалога отправитель генерирует AES-256 «Sender Key».
-//   • Sender Key шифруется RSA публичным ключом получателя и своим (self-backup),
-//     затем оба варианта сохраняются на сервере.
-//   • Сообщения шифруются AES-GCM с уникальным IV на каждое.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─── Типы ────────────────────────────────────────────────────────────────────
-
-export interface E2EEKeyPair {
-	publicKey: string // base64 SPKI
-	privateKey: string // base64 PKCS8
-}
-
-export interface EncryptedPayload {
-	iv: string // base64
-	data: string // base64
-}
 
 // ─── RSA ─────────────────────────────────────────────────────────────────────
 
-/**
- * Генерирует пару RSA-OAEP 2048-bit ключей.
- * Возвращает оба ключа в base64 (SPKI / PKCS8).
- */
-export const generateRSAKeyPair = async (): Promise<E2EEKeyPair> => {
+export const generateRSAKeyPair = async () => {
 	const keyPair = await crypto.subtle.generateKey(
 		{
 			name: 'RSA-OAEP',
@@ -52,10 +27,6 @@ export const generateRSAKeyPair = async (): Promise<E2EEKeyPair> => {
 	}
 }
 
-/**
- * Шифрует произвольную строку публичным RSA ключом получателя.
- * Используется для передачи Sender Key.
- */
 export const rsaEncrypt = async (
 	plaintext: string,
 	recipientPublicKeyB64: string
@@ -70,9 +41,6 @@ export const rsaEncrypt = async (
 	return bufToBase64(encrypted)
 }
 
-/**
- * Расшифровывает строку, зашифрованную своим RSA публичным ключом.
- */
 export const rsaDecrypt = async (
 	ciphertextB64: string,
 	privateKeyB64: string
@@ -87,11 +55,12 @@ export const rsaDecrypt = async (
 	return new TextDecoder().decode(decrypted)
 }
 
-// ─── AES Sender Key ───────────────────────────────────────────────────────────
+// Алиасы для обратной совместимости
+export const encryptSenderKey = rsaEncrypt
+export const decryptSenderKey = rsaDecrypt
 
-/**
- * Генерирует случайный AES-GCM-256 ключ.
- */
+// ─── AES ─────────────────────────────────────────────────────────────────────
+
 export const generateSenderKey = async (): Promise<string> => {
 	const key = await crypto.subtle.generateKey(
 		{ name: 'AES-GCM', length: 256 },
@@ -102,12 +71,6 @@ export const generateSenderKey = async (): Promise<string> => {
 	return bufToBase64(raw)
 }
 
-// ─── Шифрование / расшифровка сообщений ──────────────────────────────────────
-
-/**
- * Шифрует сообщение AES-GCM с уникальным IV.
- * Формат результата: "base64(iv):base64(ciphertext)"
- */
 export const encryptMessage = async (
 	message: string,
 	senderKeyB64: string
@@ -123,24 +86,15 @@ export const encryptMessage = async (
 	return `${bufToBase64(iv)}:${bufToBase64(encrypted)}`
 }
 
-/**
- * Расшифровывает сообщение, зашифрованное encryptMessage.
- * Бросает исключение при неверном ключе или повреждённых данных.
- */
 export const decryptMessage = async (
 	encryptedMessage: string,
 	senderKeyB64: string
 ): Promise<string> => {
 	const colonIdx = encryptedMessage.indexOf(':')
-	if (colonIdx === -1) throw new Error('Invalid encrypted message format')
-
-	const ivB64 = encryptedMessage.slice(0, colonIdx)
-	const dataB64 = encryptedMessage.slice(colonIdx + 1)
-
+	if (colonIdx === -1) throw new Error('Invalid format')
 	const key = await importAESKey(senderKeyB64)
-	const iv = base64ToBuf(ivB64)
-	const data = base64ToBuf(dataB64)
-
+	const iv = base64ToBuf(encryptedMessage.slice(0, colonIdx))
+	const data = base64ToBuf(encryptedMessage.slice(colonIdx + 1))
 	const decrypted = await crypto.subtle.decrypt(
 		{ name: 'AES-GCM', iv },
 		key,
@@ -149,62 +103,88 @@ export const decryptMessage = async (
 	return new TextDecoder().decode(decrypted)
 }
 
-/**
- * Проверяет, выглядит ли строка как зашифрованное сообщение.
- */
-export const isEncrypted = (message: string): boolean =>
-	message.includes(':') && isValidBase64(message.split(':')[0]!)
+export const isEncrypted = (msg: string): boolean =>
+	typeof msg === 'string' && msg.includes(':')
 
 // ─── localStorage ─────────────────────────────────────────────────────────────
+//
+// Все ключи под префиксом e2ee: для изоляции.
+// При первом чтении мигрируем старые ключи (без префикса) автоматически.
+//
 
 const PRIVATE_KEY_PREFIX = 'e2ee:private:'
 const SENDER_KEY_PREFIX = 'e2ee:sender:'
-const KEY_UPLOADED_PREFIX = 'e2ee:uploaded:'
+const UPLOADED_FLAG_PREFIX = 'e2ee:uploaded:'
+
+// ── Приватный RSA ключ ────────────────────────────────────────────────────────
 
 export const savePrivateKey = (userId: string, key: string): void =>
 	localStorage.setItem(`${PRIVATE_KEY_PREFIX}${userId}`, key)
 
-export const getPrivateKey = (userId: string): string | null =>
-	localStorage.getItem(`${PRIVATE_KEY_PREFIX}${userId}`)
+export const getPrivateKey = (userId: string): string | null => {
+	const modern = localStorage.getItem(`${PRIVATE_KEY_PREFIX}${userId}`)
+	if (modern) return modern
 
-export const removePrivateKey = (userId: string): void =>
-	localStorage.removeItem(`${PRIVATE_KEY_PREFIX}${userId}`)
+	// Миграция старого формата
+	const legacy = localStorage.getItem(`private_key_${userId}`)
+	if (legacy) {
+		localStorage.setItem(`${PRIVATE_KEY_PREFIX}${userId}`, legacy)
+		localStorage.removeItem(`private_key_${userId}`)
+		return legacy
+	}
+	return null
+}
 
-/**
- * conversationId = `${senderId}_${recipientId}`
- */
+// ── Sender Key ────────────────────────────────────────────────────────────────
+
 export const saveSenderKey = (conversationId: string, key: string): void =>
 	localStorage.setItem(`${SENDER_KEY_PREFIX}${conversationId}`, key)
 
-export const getSenderKey = (conversationId: string): string | null =>
-	localStorage.getItem(`${SENDER_KEY_PREFIX}${conversationId}`)
+export const getSenderKey = (conversationId: string): string | null => {
+	const modern = localStorage.getItem(`${SENDER_KEY_PREFIX}${conversationId}`)
+	if (modern) return modern
 
-export const removeSenderKey = (conversationId: string): void =>
+	// Миграция старого формата
+	const legacy = localStorage.getItem(`sender_key_${conversationId}`)
+	if (legacy) {
+		localStorage.setItem(`${SENDER_KEY_PREFIX}${conversationId}`, legacy)
+		localStorage.removeItem(`sender_key_${conversationId}`)
+		return legacy
+	}
+	return null
+}
+
+export const removeSenderKey = (conversationId: string): void => {
 	localStorage.removeItem(`${SENDER_KEY_PREFIX}${conversationId}`)
+	localStorage.removeItem(`${UPLOADED_FLAG_PREFIX}${conversationId}`)
+}
 
-/**
- * Флаг: Sender Key для данного диалога реально загружен на сервер.
- * Отдельно от самого ключа, чтобы отличать «есть локально» от «загружен».
- */
+// ── Флаг: SenderKey загружен на сервер ───────────────────────────────────────
+
 export const markSenderKeyUploaded = (conversationId: string): void =>
-	localStorage.setItem(`${KEY_UPLOADED_PREFIX}${conversationId}`, '1')
+	localStorage.setItem(`${UPLOADED_FLAG_PREFIX}${conversationId}`, '1')
 
 export const isSenderKeyUploaded = (conversationId: string): boolean =>
-	localStorage.getItem(`${KEY_UPLOADED_PREFIX}${conversationId}`) === '1'
+	localStorage.getItem(`${UPLOADED_FLAG_PREFIX}${conversationId}`) === '1'
 
-export const clearUploadedMark = (conversationId: string): void =>
-	localStorage.removeItem(`${KEY_UPLOADED_PREFIX}${conversationId}`)
+export const clearAllUploadedMarks = (): void => {
+	const toRemove: string[] = []
+	for (let i = 0; i < localStorage.length; i++) {
+		const k = localStorage.key(i)
+		if (k?.startsWith(UPLOADED_FLAG_PREFIX)) toRemove.push(k)
+	}
+	toRemove.forEach(k => localStorage.removeItem(k))
+}
 
-// ─── Утилиты расшифровки превью (без хука) ───────────────────────────────────
+// ── decryptPreview ────────────────────────────────────────────────────────────
 
 /**
- * Расшифровывает превью последнего сообщения в списке диалогов.
- * Не бросает исключений — возвращает fallback при любой ошибке.
+ * Расшифровывает превью сообщения для списка диалогов.
  *
  * @param encryptedContent  зашифрованное сообщение
- * @param senderId          id отправителя сообщения
+ * @param senderId          id отправителя
  * @param currentUserId     id текущего пользователя
- * @param otherUserId       id собеседника (нужен для поиска своего SenderKey)
+ * @param otherUserId       id собеседника (второй участник диалога)
  */
 export const decryptPreview = async (
 	encryptedContent: string,
@@ -215,16 +195,11 @@ export const decryptPreview = async (
 	try {
 		if (!isEncrypted(encryptedContent)) return encryptedContent
 
-		// Своё сообщение → свой Sender Key (conversationId = currentUser_other)
-		if (senderId === currentUserId) {
-			const conversationId = `${currentUserId}_${otherUserId}`
-			const senderKey = getSenderKey(conversationId)
-			if (!senderKey) return '🔒 Сообщение'
-			return await decryptMessage(encryptedContent, senderKey)
-		}
+		const conversationId =
+			senderId === currentUserId
+				? `${currentUserId}_${otherUserId}` // своё → ключ currentUser_other
+				: `${senderId}_${currentUserId}` // чужое → ключ sender_currentUser
 
-		// Чужое сообщение → Sender Key собеседника (conversationId = sender_currentUser)
-		const conversationId = `${senderId}_${currentUserId}`
 		const senderKey = getSenderKey(conversationId)
 		if (!senderKey) return '🔒 Сообщение'
 		return await decryptMessage(encryptedContent, senderKey)
@@ -233,7 +208,7 @@ export const decryptPreview = async (
 	}
 }
 
-// ─── Вспомогательные функции ──────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export const bufToBase64 = (buf: ArrayBuffer | Uint8Array): string =>
 	btoa(String.fromCharCode(...new Uint8Array(buf)))
@@ -243,14 +218,6 @@ export const base64ToBuf = (b64: string): ArrayBuffer => {
 	const buf = new Uint8Array(binary.length)
 	for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i)
 	return buf.buffer
-}
-
-const isValidBase64 = (str: string): boolean => {
-	try {
-		return btoa(atob(str)) === str
-	} catch {
-		return false
-	}
 }
 
 const importRSAPublicKey = (b64: string): Promise<CryptoKey> =>

@@ -1,26 +1,5 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// hooks/useE2EE.ts
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Жизненный цикл:
-//
-//  1. При монтировании (session ready):
-//     - Проверяем наличие RSA private key в localStorage.
-//     - Если нет — генерируем пару, сохраняем приватный локально,
-//       загружаем публичный на сервер.
-//
-//  2. При открытии диалога (recipientId ready):
-//     - Проверяем: есть ли SenderKey локально И был ли он загружен на сервер.
-//     - Если оба условия выполнены — готово.
-//     - Иначе: пытаемся (пере)загрузить SenderKey получателю.
-//       Если публичный ключ получателя ещё не доступен — ставим флаг pending,
-//       откладываем до следующего открытия / повторной попытки.
-//
-//  3. encrypt / decrypt — публичные методы для компонентов.
-//
-// ─────────────────────────────────────────────────────────────────────────────
-
 import {
+	clearAllUploadedMarks,
 	decryptMessage,
 	encryptMessage,
 	generateRSAKeyPair,
@@ -28,8 +7,7 @@ import {
 	getPrivateKey,
 	getSenderKey,
 	isEncrypted,
-	isSenderKeyUploaded,
-	markSenderKeyUploaded,
+	removeSenderKey,
 	rsaDecrypt,
 	rsaEncrypt,
 	savePrivateKey,
@@ -38,10 +16,9 @@ import {
 import { useSession } from 'next-auth/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-// ─── Вспомогательные API-функции ─────────────────────────────────────────────
+// ─── API ──────────────────────────────────────────────────────────────────────
 
 const api = {
-	/** Загружает публичный RSA ключ текущего пользователя на сервер */
 	uploadPublicKey: (publicKey: string) =>
 		fetch('/api/keys', {
 			method: 'POST',
@@ -49,15 +26,17 @@ const api = {
 			body: JSON.stringify({ publicKey })
 		}),
 
-	/** Получает публичный RSA ключ пользователя по id */
 	getPublicKey: async (userId: string): Promise<string | null> => {
-		const res = await fetch(`/api/keys?userId=${userId}`)
-		if (!res.ok) return null
-		const { publicKey } = await res.json()
-		return publicKey ?? null
+		try {
+			const res = await fetch(`/api/keys?userId=${userId}`)
+			if (!res.ok) return null
+			const data = await res.json()
+			return data.publicKey ?? null
+		} catch {
+			return null
+		}
 	},
 
-	/** Загружает зашифрованный Sender Key для получателя */
 	uploadSenderKey: (recipientId: string, encryptedKey: string) =>
 		fetch('/api/sender-keys', {
 			method: 'POST',
@@ -65,15 +44,17 @@ const api = {
 			body: JSON.stringify({ recipientId, encryptedKey })
 		}),
 
-	/** Получает зашифрованный Sender Key отправителя (для расшифровки входящих) */
 	getSenderKey: async (senderId: string): Promise<string | null> => {
-		const res = await fetch(`/api/sender-keys?senderId=${senderId}`)
-		if (!res.ok) return null
-		const { encryptedKey } = await res.json()
-		return encryptedKey ?? null
+		try {
+			const res = await fetch(`/api/sender-keys?senderId=${senderId}`)
+			if (!res.ok) return null
+			const data = await res.json()
+			return data.encryptedKey ?? null
+		} catch {
+			return null
+		}
 	},
 
-	/** Загружает self-backup Sender Key, зашифрованный своим RSA */
 	uploadSelfBackup: (encryptedKey: string) =>
 		fetch('/api/sender-keys/own', {
 			method: 'POST',
@@ -81,23 +62,23 @@ const api = {
 			body: JSON.stringify({ encryptedKey })
 		}),
 
-	/** Получает self-backup Sender Key (при смене браузера) */
 	getSelfBackup: async (): Promise<string | null> => {
-		const res = await fetch('/api/sender-keys/own')
-		if (!res.ok) return null
-		const { encryptedKey } = await res.json()
-		return encryptedKey ?? null
+		try {
+			const res = await fetch('/api/sender-keys/own')
+			if (!res.ok) return null
+			const data = await res.json()
+			return data.encryptedKey ?? null
+		} catch {
+			return null
+		}
 	}
 }
 
 // ─── Хук ─────────────────────────────────────────────────────────────────────
 
 interface UseE2EEReturn {
-	/** true когда ключи инициализированы и можно шифровать/расшифровывать */
 	ready: boolean
-	/** Шифрует сообщение своим Sender Key. Возвращает null если ключ не готов. */
 	encrypt: (message: string) => Promise<string | null>
-	/** Расшифровывает сообщение. senderId — автор сообщения. */
 	decrypt: (encryptedMsg: string, senderId: string) => Promise<string>
 }
 
@@ -105,141 +86,127 @@ export const useE2EE = (recipientId?: string): UseE2EEReturn => {
 	const { data: session } = useSession()
 	const userId = session?.user?.id
 
-	// true когда RSA ключи готовы
 	const [rsaReady, setRsaReady] = useState(false)
-	// true когда SenderKey для текущего диалога загружен на сервер
 	const [senderKeyReady, setSenderKeyReady] = useState(false)
+	// Счётчик повторных попыток когда у получателя нет RSA ключа
+	const [retryCount, setRetryCount] = useState(0)
 
-	// Sender Key текущего диалога (исходящие сообщения)
 	const mySenderKeyRef = useRef<string | null>(null)
-	// Кэш расшифрованных Sender Key входящих (senderId → ключ)
-	const incomingSenderKeysRef = useRef<Map<string, string>>(new Map())
+	const incomingKeysRef = useRef<Map<string, string>>(new Map())
 
-	// ── Шаг 1: RSA инициализация ────────────────────────────────────────────────
+	// ── Шаг 1: RSA ───────────────────────────────────────────────────────────
+
 	useEffect(() => {
 		if (!userId) return
 
-		const initRSA = async () => {
-			const existingPrivateKey = getPrivateKey(userId)
+		const init = async () => {
+			const regenerate = async () => {
+				const { publicKey, privateKey } = await generateRSAKeyPair()
+				savePrivateKey(userId, privateKey)
+				await api.uploadPublicKey(publicKey)
+				clearAllUploadedMarks()
+				incomingKeysRef.current.clear()
+				setRsaReady(true)
+			}
 
-			if (existingPrivateKey) {
-				// Приватный ключ есть локально — проверяем, загружен ли публичный на сервер
-				const serverPublicKey = await api.getPublicKey(userId)
-				if (!serverPublicKey) {
-					// Приватный ключ есть, но публичный не загружен — загружаем заново.
-					// Публичный ключ придётся восстановить через перегенерацию.
-					await regenerateRSAKeys(userId)
-				} else {
-					setRsaReady(true)
-				}
+			const existingPrivate = getPrivateKey(userId)
+			if (!existingPrivate) {
+				await regenerate()
 				return
 			}
 
-			// Приватного ключа нет — проверяем, есть ли self-backup Sender Key на сервере.
-			// Это значит пользователь уже был зарегистрирован, просто сменил браузер.
-			await regenerateRSAKeys(userId)
+			const serverKey = await api.getPublicKey(userId)
+			if (!serverKey) {
+				await regenerate()
+				return
+			}
+
+			setRsaReady(true)
 		}
 
-		void initRSA()
+		void init()
 	}, [userId])
 
-	const regenerateRSAKeys = async (uid: string) => {
-		const { publicKey, privateKey } = await generateRSAKeyPair()
-		savePrivateKey(uid, privateKey)
-		await api.uploadPublicKey(publicKey)
+	// ── Шаг 2: Sender Key ─────────────────────────────────────────────────────
+	//
+	// Ключевой принцип: ВСЕГДА перезагружаем SenderKey при открытии чата.
+	// Это решает два сценария:
+	//   а) Первое открытие: у получателя не было RSA ключа → retryCount поднимает
+	//      счётчик каждые 4 сек пока получатель не зарегистрируется
+	//   б) Получатель сменил браузер → новый RSA ключ → мы шифруем под новый
 
-		// Все ранее загруженные Sender Key теперь зашифрованы старым RSA —
-		// они станут нерасшифруемыми. Сбрасываем флаги загрузки.
-		// (Sender Key в localStorage оставляем — они ещё пригодятся для исходящих.)
-		clearAllUploadedMarks()
-
-		setRsaReady(true)
-	}
-
-	// ── Шаг 2: Sender Key для диалога ──────────────────────────────────────────
 	useEffect(() => {
 		if (!rsaReady || !userId || !recipientId) return
 
-		setSenderKeyReady(false)
-		mySenderKeyRef.current = null
-
 		const initSenderKey = async () => {
+			setSenderKeyReady(false)
+			mySenderKeyRef.current = null
+
 			const conversationId = `${userId}_${recipientId}`
-			const cachedKey = getSenderKey(conversationId)
-			const alreadyUploaded = isSenderKeyUploaded(conversationId)
 
-			// Ключ есть локально и уже загружен на сервер — всё готово
-			if (cachedKey && alreadyUploaded) {
-				mySenderKeyRef.current = cachedKey
-				setSenderKeyReady(true)
-				return
-			}
+			// Берём существующий ключ или генерируем новый
+			const myKey = getSenderKey(conversationId) ?? (await generateSenderKey())
+			saveSenderKey(conversationId, myKey)
+			mySenderKeyRef.current = myKey
 
-			// Нужно (пере)загрузить Sender Key получателю
+			// Получаем текущий RSA публичный ключ получателя
 			const recipientPublicKey = await api.getPublicKey(recipientId)
 
 			if (!recipientPublicKey) {
 				// Получатель ещё не зарегистрировал RSA ключ.
-				// Сохраняем Sender Key локально — загрузим при следующей возможности.
-				if (!cachedKey) {
-					const newKey = await generateSenderKey()
-					saveSenderKey(conversationId, newKey)
-					mySenderKeyRef.current = newKey
-				} else {
-					mySenderKeyRef.current = cachedKey
-				}
-				// senderKeyReady остаётся false — encrypt вернёт null,
-				// пока ключ не будет загружен получателю.
-				// Компонент должен показать состояние ожидания.
+				// retryEffect ниже поднимет retryCount → этот effect перезапустится.
 				return
 			}
 
-			// Публичный ключ получателя доступен
-			const keyToUpload = cachedKey ?? (await generateSenderKey())
-			if (!cachedKey) saveSenderKey(conversationId, keyToUpload)
-			mySenderKeyRef.current = keyToUpload
-
-			// Шифруем Sender Key для получателя и загружаем
-			const encryptedForRecipient = await rsaEncrypt(
-				keyToUpload,
-				recipientPublicKey
-			)
+			// Всегда перешифровываем под актуальный RSA ключ получателя.
+			// Если получатель сменил браузер — здесь подхватим его новый ключ.
+			const encryptedForRecipient = await rsaEncrypt(myKey, recipientPublicKey)
 			await api.uploadSenderKey(recipientId, encryptedForRecipient)
-			markSenderKeyUploaded(conversationId)
 
-			// Self-backup: шифруем своим RSA и загружаем
-			// (позволяет восстановить ключ при смене браузера)
+			// Self-backup: шифруем своим RSA для восстановления при смене браузера
 			const myPublicKey = await api.getPublicKey(userId)
 			if (myPublicKey) {
-				const encryptedSelf = await rsaEncrypt(keyToUpload, myPublicKey)
-				await api.uploadSelfBackup(encryptedSelf)
+				const encryptedSelf = await rsaEncrypt(myKey, myPublicKey)
+				void api.uploadSelfBackup(encryptedSelf)
 			}
 
 			setSenderKeyReady(true)
 		}
 
 		void initSenderKey()
-	}, [rsaReady, userId, recipientId])
+	}, [rsaReady, userId, recipientId, retryCount])
 
-	// ── Получить Sender Key входящего отправителя ───────────────────────────────
+	// Retry: если senderKeyReady=false (получатель не зарегистрирован),
+	// повторяем попытку каждые 4 секунды
+	useEffect(() => {
+		if (senderKeyReady || !rsaReady || !userId || !recipientId) return
+		const t = setTimeout(() => setRetryCount(c => c + 1), 4000)
+		return () => clearTimeout(t)
+	}, [senderKeyReady, rsaReady, userId, recipientId, retryCount])
+
+	// ── Входящие: получить SenderKey отправителя ──────────────────────────────
 
 	const getSenderKeyFor = useCallback(
-		async (senderId: string): Promise<string | null> => {
+		async (senderId: string, forceRefresh = false): Promise<string | null> => {
 			if (!userId) return null
 
-			// Проверяем кэш в памяти
-			const cached = incomingSenderKeysRef.current.get(senderId)
-			if (cached) return cached
-
-			// Проверяем localStorage
 			const conversationId = `${senderId}_${userId}`
-			const localKey = getSenderKey(conversationId)
-			if (localKey) {
-				incomingSenderKeysRef.current.set(senderId, localKey)
-				return localKey
+
+			if (!forceRefresh) {
+				const memCached = incomingKeysRef.current.get(senderId)
+				if (memCached) return memCached
+
+				const local = getSenderKey(conversationId)
+				if (local) {
+					incomingKeysRef.current.set(senderId, local)
+					return local
+				}
+			} else {
+				incomingKeysRef.current.delete(senderId)
+				removeSenderKey(conversationId)
 			}
 
-			// Запрашиваем зашифрованный Sender Key с сервера
+			// Запрашиваем с сервера
 			const encryptedKey = await api.getSenderKey(senderId)
 			if (!encryptedKey) return null
 
@@ -249,24 +216,22 @@ export const useE2EE = (recipientId?: string): UseE2EEReturn => {
 			try {
 				const senderKey = await rsaDecrypt(encryptedKey, privateKey)
 				saveSenderKey(conversationId, senderKey)
-				incomingSenderKeysRef.current.set(senderId, senderKey)
+				incomingKeysRef.current.set(senderId, senderKey)
 				return senderKey
 			} catch {
-				// Расшифровка не удалась — скорее всего ключ был зашифрован
-				// под старый RSA (после смены браузера отправителем).
+				// RSA расшифровка не удалась: ключ зашифрован под другой RSA
 				return null
 			}
 		},
 		[userId]
 	)
 
-	// ── Публичные методы ────────────────────────────────────────────────────────
+	// ── Публичные методы ───────────────────────────────────────────────────────
 
 	const encrypt = useCallback(
 		async (message: string): Promise<string | null> => {
-			const key = mySenderKeyRef.current
-			if (!key || !senderKeyReady) return null
-			return encryptMessage(message, key)
+			if (!mySenderKeyRef.current || !senderKeyReady) return null
+			return encryptMessage(message, mySenderKeyRef.current)
 		},
 		[senderKeyReady]
 	)
@@ -278,22 +243,27 @@ export const useE2EE = (recipientId?: string): UseE2EEReturn => {
 			try {
 				if (!isEncrypted(encryptedMsg)) return encryptedMsg
 
-				// Своё сообщение → расшифровываем своим Sender Key
+				// Своё сообщение
 				if (senderId === userId) {
-					const key = mySenderKeyRef.current
-					if (!key) {
-						// Sender Key не в памяти — пробуем восстановить self-backup
-						const restored = await restoreOwnSenderKey(userId, recipientId)
-						if (!restored) return '[Ключ не найден]'
-						return await decryptMessage(encryptedMsg, restored)
-					}
+					const key =
+						mySenderKeyRef.current ??
+						(await restoreOwnSenderKey(userId, recipientId))
+					if (!key) return '[Ключ не найден]'
 					return await decryptMessage(encryptedMsg, key)
 				}
 
-				// Чужое сообщение → ищем Sender Key отправителя
+				// Входящее сообщение
 				const senderKey = await getSenderKeyFor(senderId)
 				if (!senderKey) return '[Ключ не получен]'
-				return await decryptMessage(encryptedMsg, senderKey)
+
+				try {
+					return await decryptMessage(encryptedMsg, senderKey)
+				} catch {
+					// AES упала — ключ устарел, берём свежий с сервера
+					const freshKey = await getSenderKeyFor(senderId, true)
+					if (!freshKey) return '[Ключ устарел]'
+					return await decryptMessage(encryptedMsg, freshKey)
+				}
 			} catch {
 				return '[Ошибка расшифровки]'
 			}
@@ -301,20 +271,11 @@ export const useE2EE = (recipientId?: string): UseE2EEReturn => {
 		[userId, recipientId, getSenderKeyFor]
 	)
 
-	return {
-		ready: rsaReady && senderKeyReady,
-		encrypt,
-		decrypt
-	}
+	return { ready: rsaReady && senderKeyReady, encrypt, decrypt }
 }
 
-// ─── Вспомогательные функции хука ────────────────────────────────────────────
+// ─── Восстановление своего Sender Key из self-backup ─────────────────────────
 
-/**
- * Восстанавливает свой Sender Key из self-backup на сервере.
- * Вызывается когда mySenderKeyRef пуст (например, после перезагрузки
- * страницы в ситуации, когда localStorage был очищен между сессиями).
- */
 async function restoreOwnSenderKey(
 	userId: string,
 	recipientId?: string
@@ -329,26 +290,11 @@ async function restoreOwnSenderKey(
 		const senderKey = await rsaDecrypt(encryptedBackup, privateKey)
 
 		if (recipientId) {
-			const conversationId = `${userId}_${recipientId}`
-			saveSenderKey(conversationId, senderKey)
-			markSenderKeyUploaded(conversationId)
+			saveSenderKey(`${userId}_${recipientId}`, senderKey)
 		}
 
 		return senderKey
 	} catch {
 		return null
 	}
-}
-
-/**
- * Сбрасывает флаги "загружено" для всех Sender Key в localStorage.
- * Вызывается при перегенерации RSA ключей.
- */
-function clearAllUploadedMarks() {
-	const keysToRemove: string[] = []
-	for (let i = 0; i < localStorage.length; i++) {
-		const key = localStorage.key(i)
-		if (key?.startsWith('e2ee:uploaded:')) keysToRemove.push(key)
-	}
-	keysToRemove.forEach(key => localStorage.removeItem(key))
 }

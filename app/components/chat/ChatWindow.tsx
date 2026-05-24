@@ -9,12 +9,14 @@ import { DeleteMode } from '@/app/types/chat'
 import {
 	EllipsisVertical,
 	Loader2,
-	SendHorizontal,
+	MicIcon,
+	Smile,
 	Trash2,
 	UserCircle,
 	XCircle
 } from 'lucide-react'
 import { useSession } from 'next-auth/react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -225,12 +227,35 @@ const ChatWindow = ({
 		const date = new Date(dateStr)
 		const now = new Date()
 		const diffMin = Math.floor((now.getTime() - date.getTime()) / 60000)
-		if (diffMin < 1) return 'был(а) только что'
-		if (diffMin < 60) return `был(а) ${diffMin} мин. назад`
-		const isToday = date.toDateString() === now.toDateString()
-		if (isToday)
-			return `был(а) сегодня в ${date.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })}`
-		return `был(а) ${date.toLocaleDateString(lang, { day: 'numeric', month: 'long' })} в ${date.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })}`
+
+		if (diffMin < 1) return tr.wasOnlineNow
+		if (diffMin < 60) return tr.wasOnlineMins(diffMin)
+
+		const timeStr = date.toLocaleTimeString(lang, {
+			hour: '2-digit',
+			minute: '2-digit'
+		})
+
+		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+		const yesterday = new Date(today)
+		yesterday.setDate(today.getDate() - 1)
+
+		const dateOnly = new Date(
+			date.getFullYear(),
+			date.getMonth(),
+			date.getDate()
+		)
+
+		if (dateOnly.getTime() === today.getTime())
+			return tr.wasOnlineToday(timeStr)
+		if (dateOnly.getTime() === yesterday.getTime())
+			return tr.wasOnlineYesterday(timeStr)
+
+		const dateFormatted = date.toLocaleDateString(lang, {
+			day: 'numeric',
+			month: 'long'
+		})
+		return tr.wasOnlineDate(dateFormatted, timeStr)
 	}
 
 	const statusText = isOnline
@@ -258,9 +283,9 @@ const ChatWindow = ({
 	}
 
 	return (
-		<div className="flex flex-col h-full min-h-0 overflow-hidden bg-(--bg-primary)">
+		<div className="flex flex-col h-full overflow-hidden bg-(--bg-primary)">
 			{/* Header */}
-			<div className="flex items-center gap-3 px-4 py-3 border-b border-(--border) bg-(--bg-secondary)">
+			<div className="flex items-center gap-4 px-5 py-4 border-b border-(--border) bg-(--bg-primary)">
 				<div className="relative shrink-0">
 					<div
 						className="w-10 h-10 rounded-full bg-(--bg-card) flex items-center justify-center text-sm font-bold text-(--text-primary) cursor-pointer"
@@ -268,7 +293,17 @@ const ChatWindow = ({
 							router.push(`/components/profile/${recipient.id}`)
 						}}
 					>
-						{recipient.name?.[0].toUpperCase() ?? '?'}
+						{recipient.image ? (
+							<Image
+								src={recipient.image}
+								width={40}
+								height={40}
+								className="rounded-full object-cover w-10 h-10"
+								alt={recipient.name ?? ''}
+							/>
+						) : (
+							(recipient.name ?? '?')[0].toUpperCase()
+						)}
 					</div>
 					{isOnline && (
 						<span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-(--bg-secondary) rounded-full" />
@@ -305,7 +340,7 @@ const ChatWindow = ({
 					</button>
 
 					{showMenu && (
-						<div className="absolute right-0 top-10 z-30 bg-(--bg-secondary) border border-(--border) rounded-xl p-1 shadow-xl min-w-48">
+						<div className="absolute right-0 top-18 z-30 bg-(--bg-secondary) border border-(--border) rounded-xl p-1 shadow-xl min-w-48">
 							<button
 								className="w-full flex items-center gap-2 px-3 py-2 text-xs text-(--text-primary)/70 hover:bg-(--bg-card) rounded-lg transition-colors text-left"
 								onClick={() => {
@@ -327,6 +362,7 @@ const ChatWindow = ({
 								<Trash2 className="w-3.5 h-3.5" />
 								{deleteModalText.mine.title}
 							</button>
+
 							<button
 								onClick={() => {
 									setDeleteMode('all')
@@ -406,8 +442,11 @@ const ChatWindow = ({
 			</div>
 
 			{/* Input */}
-			<div className="px-4 py-3 border-t border-(--border) bg-(--bg-secondary)">
-				<div className="flex items-end gap-2">
+			<div className="py-5 px-3">
+				<div className="flex items-end gap-1">
+					<div className="bg-(--bg-secondary) rounded-full p-2.5">
+						<Smile className="w-6 h-6 text-(--text-primary)/85" />
+					</div>
 					<textarea
 						value={content}
 						onChange={e => setContent(e.target.value)}
@@ -419,15 +458,11 @@ const ChatWindow = ({
 						}}
 						placeholder={tr.writeMessage}
 						rows={1}
-						className="flex-1 bg-(--bg-primary) border border-(--border) focus:border-(--text-primary)/20 rounded-xl px-4 py-2.5 text-sm text-(--text-primary) placeholder:text-(--text-primary)/20 resize-none focus:outline-none transition-colors"
+						className="flex-1 bg-(--bg-secondary) rounded-full px-4.5 py-2.5 text-md text-(--text-primary) placeholder:text-(--text-primary)/90 resize-none focus:outline-none transition-colors"
 					/>
-					<button
-						onClick={sendMessage}
-						disabled={loading || !content.trim()}
-						className="p-2.5 rounded-xl bg-(--bg-card) hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
-					>
-						<SendHorizontal className="w-5 h-5" />
-					</button>
+					<div className="bg-(--bg-secondary) rounded-full p-2.5">
+						<MicIcon className="w-6 h-6 text-(--text-primary)/85" />
+					</div>
 				</div>
 			</div>
 
