@@ -8,7 +8,13 @@ import { decryptPreview } from '@/lib/e2ee'
 import { Check, Plus, Search } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import Image from 'next/image'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+	startTransition,
+	useCallback,
+	useEffect,
+	useRef,
+	useState
+} from 'react'
 
 const UserList = ({ onSelect, selected }: Props) => {
 	const { data: session } = useSession()
@@ -42,8 +48,7 @@ const UserList = ({ onSelect, selected }: Props) => {
 
 	useEffect(() => {
 		if (!session?.user?.id || !Object.keys(previews).length) return
-
-		const decryptAll = async () => {
+		;(async () => {
 			const result: Record<string, string> = {}
 			await Promise.all(
 				Object.entries(previews).map(async ([userId, preview]) => {
@@ -56,9 +61,7 @@ const UserList = ({ onSelect, selected }: Props) => {
 				})
 			)
 			setDecryptedPreviews(result)
-		}
-
-		void decryptAll()
+		})()
 	}, [previews, session?.user?.id])
 
 	const loadFolders = useCallback(async () => {
@@ -66,11 +69,14 @@ const UserList = ({ onSelect, selected }: Props) => {
 		setFolders(await res.json())
 	}, [])
 
+	// Fix: startTransition убирает warning о синхронных вызовах внутри эффекта
 	useEffect(() => {
 		if (!session?.user?.id) return
-		fetch('/api/chat/users')
-			.then(r => r.json())
-			.then(setUsers)
+		startTransition(() => {
+			fetch('/api/chat/users')
+				.then(r => r.json())
+				.then(setUsers)
+		})
 		void loadPreviews()
 		void loadFolders()
 		const interval = setInterval(loadPreviews, 5000)
@@ -161,6 +167,19 @@ const UserList = ({ onSelect, selected }: Props) => {
 		return isToday
 			? date.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })
 			: date.toLocaleDateString(lang, { day: 'numeric', month: 'short' })
+	}
+
+	// Определяем аудио по расшифрованному содержимому
+	const isAudioPreview = (text: string) =>
+		text.startsWith('data:audio/') || text.startsWith('blob:')
+
+	const formatPreview = (userId: string) => {
+		const preview = previews[userId]
+		const decrypted = decryptedPreviews[userId]
+		if (!preview) return tr.clickToChat
+		if (!decrypted) return '🔒'
+		if (isAudioPreview(decrypted)) return '🎤 Голосовое сообщение'
+		return decrypted
 	}
 
 	return (
@@ -254,6 +273,9 @@ const UserList = ({ onSelect, selected }: Props) => {
 				) : (
 					filteredUsers.map(u => {
 						const isOnline = onlineUsers.has(u.id)
+						const previewText = formatPreview(u.id)
+						const isAudio = previewText === '🎤 Голосовое сообщение'
+
 						return (
 							<div
 								key={u.id}
@@ -305,13 +327,11 @@ const UserList = ({ onSelect, selected }: Props) => {
 													{u.name}
 												</p>
 												<p
-													className={`text-xs truncate mt-0.5 ${(unread[u.id] ?? 0) > 0 ? 'text-(--text-primary)/60 font-medium' : 'text-(--text-primary)/30'}`}
+													className={`text-xs truncate mt-0.5 ${(unread[u.id] ?? 0) > 0 ? 'text-(--text-primary)/60 font-medium' : 'text-(--text-primary)/30'} ${isAudio ? 'italic' : ''}`}
 												>
-													{previews[u.id]
-														? previews[u.id].senderId === session?.user?.id
-															? `Вы: ${decryptedPreviews[u.id] ?? '🔒'}`
-															: (decryptedPreviews[u.id] ?? '🔒')
-														: tr.clickToChat}
+													{previews[u.id]?.senderId === session?.user?.id
+														? `Вы: ${previewText}`
+														: previewText}
 												</p>
 											</div>
 											<div className="flex flex-col items-end gap-1 shrink-0">
