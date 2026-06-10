@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url = env("DATABASE_URL")
 }
 
 model User {
@@ -13,7 +13,7 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
-  password      String?   // для email/пароль
+  password      String?
   bio           String?
   username      String?   @unique
   accounts      Account[]
@@ -34,6 +34,7 @@ model User {
   lastSeen DateTime?
   chatFolders ChatFolder[]
   userKey    UserKey?
+  groupMembers  GroupMember[]
 }
 
 model Account {
@@ -119,7 +120,7 @@ model Friendship {
   id         String   @id @default(cuid())
   senderId   String
   receiverId String
-  status     String   @default("pending") // "pending" | "accepted"
+  status     String   @default("pending") 
   sender     User     @relation("sent", fields: [senderId], references: [id], onDelete: Cascade)
   receiver   User     @relation("received", fields: [receiverId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
@@ -132,14 +133,18 @@ model Message {
   id         String   @id @default(cuid())
   content    String
   senderId   String
-  receiverId String
+  receiverId String?
+  groupId    String?
   read       Boolean  @default(false)
   sender     User     @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver   User     @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiver   User?   @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  group      GroupChat? @relation("GroupMessages", fields: [groupId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
+  type String @default("text")
 
   @@index([senderId])
   @@index([receiverId])
+  @@index([groupId])
 }
 
 model ChatFolder {
@@ -165,7 +170,7 @@ model Notification {
   content   String
   type      String
   read      Boolean  @default(false)
-  senderId  String?  // кто вызвал уведомление
+  senderId  String?  
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
@@ -200,10 +205,31 @@ model UserKey {
 
 model SenderKey {
   id               String   @id @default(cuid())
-  senderId         String   // кто создал ключ
-  recipientId      String   // для кого зашифрован
-  encryptedKey     String   // AES ключ, зашифрованный RSA публичным ключом получателя
+  senderId         String  
+  recipientId      String   
+  encryptedKey     String   
   createdAt        DateTime @default(now())
 
   @@unique([senderId, recipientId])
+}
+
+model GroupChat {
+  id        String        @id @default(cuid())
+  name      String
+  avatar    String?
+  createdAt DateTime      @default(now())
+  createdBy String
+  members   GroupMember[]
+  messages  Message[] @relation("GroupMessages")
+}
+
+model GroupMember {
+  groupId   String
+  userId    String
+  role      String    @default("member")
+  joinedAt  DateTime  @default(now())
+  group     GroupChat @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
 }
