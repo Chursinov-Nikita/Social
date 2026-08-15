@@ -1,19 +1,25 @@
+"use client";
+
 import { useState, useEffect } from "react";
 import { Check, X } from "lucide-react";
 import { ChatUser, GroupChat } from "@/app/types/chat";
 import Image from "next/image";
+import { t } from "@/app/translation/translation";
+import { useLang } from "@/app/context/language";
 
 type Props = {
   onClose: () => void;
-  onCreated: (group: GroupChat) => void;
+  onCreate: (name: string, memberIds: string[]) => Promise<GroupChat>;
 };
 
-const CreateGroupModal = ({ onClose, onCreated }: Props) => {
+const CreateGroupModal = ({ onClose, onCreate }: Props) => {
   const [name, setName] = useState("");
   const [search, setSearch] = useState("");
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const { lang } = useLang();
+  const tr = t[lang];
 
   useEffect(() => {
     fetch("/api/chat/users")
@@ -34,28 +40,27 @@ const CreateGroupModal = ({ onClose, onCreated }: Props) => {
   const handleCreate = async () => {
     if (!name.trim() || selected.length === 0) return;
     setLoading(true);
-    const res = await fetch("/api/groups", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), memberIds: selected }),
-    });
-    const group = await res.json();
-    onCreated(group);
-    onClose();
-    setLoading(false);
+    try {
+      await onCreate(name.trim(), selected);
+    } catch (error) {
+      console.error("Failed to create group", error);
+    } finally {
+      setLoading(false);
+      onClose();
+    }
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
       onClick={() => !loading && onClose()}
     >
       <div
-        className="w-full max-w-sm rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 space-y-4"
+        className="w-full max-w-sm rounded-2xl border border-(--border) bg-(--bg-primary) p-5 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
         <p className="text-sm font-semibold text-(--text-primary)">
-          Новая группа
+          {tr.newGroup}
         </p>
 
         {/* Название */}
@@ -63,7 +68,7 @@ const CreateGroupModal = ({ onClose, onCreated }: Props) => {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Название группы"
+          placeholder={tr.groupName}
           className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none focus:border-(--text-primary)/20 transition-colors"
         />
 
@@ -93,7 +98,7 @@ const CreateGroupModal = ({ onClose, onCreated }: Props) => {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Поиск участников..."
+          placeholder={tr.searchMembers}
           className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none focus:border-(--text-primary)/20 transition-colors"
         />
 
@@ -139,14 +144,14 @@ const CreateGroupModal = ({ onClose, onCreated }: Props) => {
             disabled={loading}
             className="px-4 py-2 text-xs font-semibold text-(--text-primary)/60 hover:bg-(--bg-card) rounded-xl transition-colors disabled:opacity-40"
           >
-            Отмена
+            {tr.cancel}
           </button>
           <button
             onClick={handleCreate}
             disabled={!name.trim() || selected.length === 0 || loading}
             className="px-4 py-2 text-xs font-semibold text-(--text-primary) bg-(--bg-card) hover:opacity-80 rounded-xl transition-colors disabled:opacity-30"
           >
-            {loading ? "Создание..." : "Создать"}
+            {loading ? tr.creating : tr.createFolder}
           </button>
         </div>
       </div>

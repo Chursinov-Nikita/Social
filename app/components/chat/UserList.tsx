@@ -11,7 +11,7 @@ import type {
   Props,
 } from "@/app/types/chat";
 import { decryptPreview } from "@/lib/e2ee";
-import { Check, Plus, Search, Users, X } from "lucide-react";
+import { Check, Loader2, Plus, Search, Users, X } from "lucide-react";
 import { useSession } from "next-auth/react";
 import Image from "next/image";
 import {
@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 import CreateGroupModal from "./CreateGroupModal";
+import CreateFolderModal from "./CreateFolderModal";
 
 const UserList = ({
   onSelect,
@@ -36,11 +37,13 @@ const UserList = ({
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeFolder, setActiveFolder] = useState<string>("all");
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [folderMenuUser, setFolderMenuUser] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(
+    null,
+  );
   const [groups, setGroups] = useState<GroupChat[]>([]);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [decryptedPreviews, setDecryptedPreviews] = useState<
@@ -85,11 +88,6 @@ const UserList = ({
     })();
   }, [previews, session?.user?.id]);
 
-  const loadFolders = useCallback(async () => {
-    const res = await fetch("/api/chat/folders");
-    setFolders(await res.json());
-  }, []);
-
   useEffect(() => {
     if (!session?.user?.id) return;
     startTransition(() => {
@@ -98,14 +96,13 @@ const UserList = ({
         .then(setUsers);
     });
     void loadPreviews();
-    void loadFolders();
     void loadGroups();
     const interval = setInterval(() => {
       void loadPreviews();
       void loadGroups();
     }, 5000);
     return () => clearInterval(interval);
-  }, [session?.user?.id, loadPreviews, loadFolders, loadGroups]);
+  }, [session?.user?.id, loadPreviews, loadGroups]);
 
   useEffect(() => {
     if (!folderMenuUser) return;
@@ -117,17 +114,17 @@ const UserList = ({
     return () => document.removeEventListener("mousedown", handler);
   }, [folderMenuUser]);
 
-  const createFolder = async () => {
-    if (!newFolderName.trim()) return;
+  const createFolder = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
     const res = await fetch("/api/chat/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newFolderName.trim() }),
+      body: JSON.stringify({ name: trimmed }),
     });
     const folder = await res.json();
     setFolders((prev) => [...prev, folder]);
-    setNewFolderName("");
-    setIsCreateOpen(false);
+    setIsCreatingFolder(false);
   };
 
   const deleteFolder = async (id: string) => {
@@ -262,7 +259,6 @@ const UserList = ({
 
   return (
     <div className="group flex flex-col h-full">
-      {/* Шапка с поиском */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-(--border)">
         <p className="text-lg font-black">{tr.chats}</p>
         <div className="relative flex-1">
@@ -277,7 +273,7 @@ const UserList = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={tr.search}
-            className="w-full h-9 pl-9 bg-(--bg-secondary) rounded-full text-sm text-(--text-primary) placeholder:text-(--text-secondary) outline-none transition-colors border-2 border-transparent focus:border-(--text-secondary)/20"
+            className="w-full h-9 pl-9 bg-(--bg-secondary) rounded-full text-sm text-(--text-primary) placeholder:text-(--text-secondary) outline-none transition-all duration-300 border-2 border-transparent focus:border-(--text-secondary)/10"
           />
           {searchQuery && (
             <button
@@ -292,28 +288,30 @@ const UserList = ({
           )}
         </div>
       </div>
-
-      {/* Папки */}
       <div className="p-3 flex items-center gap-1 overflow-x-auto [scrollbar-width:none]">
         <button
           onClick={() => setActiveFolder("all")}
-          className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeFolder === "all" ? "bg-(--bg-card) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
+          className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeFolder === "all" ? "bg-(--bg-secondary) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
         >
           {tr.allChats}
         </button>
         <button
           onClick={() => setActiveFolder("unread")}
-          className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeFolder === "unread" ? "bg-(--bg-card) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
+          className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeFolder === "unread" ? "bg-(--bg-secondary) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
         >
           {tr.unread}
           {totalUnread > 0 && (
-            <span className="ml-1 min-w-4 h-4 px-1 bg-(--bg-card) text-(--text-primary)/60 text-[10px] font-bold rounded-full">
+            <span className="ml-1 min-w-4 h-4 px-1 bg-(--bg-secondary) text-(--text-primary)/60 text-[10px] font-bold rounded-full">
               {totalUnread}
             </span>
           )}
         </button>
         {folders.map((folder) => (
-          <div key={folder.id} className="relative shrink-0 group/folder">
+          <div
+            key={folder.id}
+            className="relative shrink-0 group/folder"
+            onMouseLeave={() => setConfirmDeleteFolder(null)}
+          >
             <button
               onClick={() => setActiveFolder(folder.id)}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${activeFolder === folder.id ? "bg-(--bg-card) text-(--text-primary)" : "text-(--text-primary)/40 hover:text-(--text-primary)"}`}
@@ -321,23 +319,40 @@ const UserList = ({
               {folder.name}
             </button>
             <button
-              onClick={() => deleteFolder(folder.id)}
+              onClick={() =>
+                confirmDeleteFolder === folder.id
+                  ? deleteFolder(folder.id)
+                  : setConfirmDeleteFolder(folder.id)
+              }
               disabled={deletingFolder === folder.id}
-              className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-10 opacity-0 group-hover/folder:opacity-100 transition-opacity px-2 py-0.5 rounded-md bg-(--bg-secondary) border border-(--border) text-[10px] text-red-400 hover:bg-red-500/10 whitespace-nowrap disabled:opacity-40"
+              className={`absolute -top-1 -right-1 z-10 opacity-0 group-hover/folder:opacity-100 transition-all duration-150 flex items-center justify-center w-4 h-4 rounded-full border disabled:opacity-40 disabled:pointer-events-none ${
+                confirmDeleteFolder === folder.id
+                  ? "bg-red-500 text-white border-red-500"
+                  : "bg-(--bg-secondary) border-(--border) text-red-400 hover:bg-red-500 hover:text-white hover:border-red-500"
+              }`}
+              title={
+                confirmDeleteFolder === folder.id
+                  ? "Подтвердить удаление"
+                  : "Удалить папку"
+              }
             >
-              {deletingFolder === folder.id ? "..." : tr.deleteFolder}
+              {deletingFolder === folder.id ? (
+                <Loader2 className="w-2 h-2 animate-spin" />
+              ) : confirmDeleteFolder === folder.id ? (
+                <Check className="w-2 h-2" />
+              ) : (
+                <X className="w-2 h-2" />
+              )}
             </button>
           </div>
         ))}
         <button
-          onClick={() => setIsCreateOpen(true)}
+          onClick={() => setIsCreatingFolder(true)}
           className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-(--text-primary)/30 hover:text-(--text-primary) hover:bg-(--bg-secondary) transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
-
-      {/* Список */}
       <div className="flex-1 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:var(--border)_transparent]">
         {allItems.length === 0 ? (
           <div className="text-center py-10">
@@ -351,7 +366,6 @@ const UserList = ({
           </div>
         ) : (
           allItems.map((item) => {
-            // ── Группа ──
             if (item.type === "group") {
               const g = item.g;
               const preview = formatGroupPreview(g);
@@ -380,7 +394,7 @@ const UserList = ({
                       });
                     }
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 transition-all duration-150 cursor-pointer select-none ${selected?.id === g.id ? "bg-(--bg-card)" : "hover:bg-(--bg-secondary)"}`}
+                  className={`w-full flex items-center gap-3 px-4 py-3 transition-all duration-150 cursor-pointer select-none ${selected?.id === g.id ? "bg-(--bg-card)" : "hover:bg-(--bg-secondary)/50"}`}
                 >
                   <div className="w-10 h-10 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
                     {g.avatar ? (
@@ -422,7 +436,6 @@ const UserList = ({
               );
             }
 
-            // ── DM ──
             const u = item.u;
             const isOnline = onlineUsers.has(u.id);
             const previewText = formatPreview(u.id);
@@ -447,7 +460,7 @@ const UserList = ({
                       onSelect(u);
                     }
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 transition-all duration-300 cursor-pointer select-none rounded-full ${selected?.id === u.id ? "bg-(--bg-card)" : "hover:bg-(--bg-secondary)"}`}
+                  className={`w-full flex items-center gap-3 px-4 py-3 transition-all duration-300 cursor-pointer select-none rounded-full ${selected?.id === u.id ? "bg-(--bg-secondary)" : "hover:bg-(--bg-secondary)/50"}`}
                 >
                   <div className="relative shrink-0">
                     {u.image ? (
@@ -530,8 +543,6 @@ const UserList = ({
           })
         )}
       </div>
-
-      {/* ── Кнопка создания группы с анимацией ── */}
       <div className="flex items-center justify-end p-5">
         <button
           onClick={() => setIsCreatingGroup(true)}
@@ -546,60 +557,39 @@ const UserList = ({
           <Plus className="w-5 h-5 text-(--text-primary)/85" />
         </button>
       </div>
-
-      {/* Модалка создания папки */}
-      {isCreateOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
-          onClick={() => setIsCreateOpen(false)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl border border-(--border) bg-(--bg-secondary) p-5 space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-sm font-semibold text-(--text-primary)">
-              {tr.newFolder}
-            </p>
-            <input
-              type="text"
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && createFolder()}
-              placeholder={tr.folderName}
-              className="w-full rounded-xl border border-(--border) bg-(--bg-primary) px-3 py-2 text-sm text-(--text-primary) placeholder:text-(--text-primary)/25 outline-none focus:border-(--text-primary)/20 transition-colors"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setIsCreateOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-(--text-primary)/60 hover:bg-(--bg-card) rounded-xl transition-colors"
-              >
-                {tr.cancel}
-              </button>
-              <button
-                onClick={createFolder}
-                disabled={!newFolderName.trim()}
-                className="px-4 py-2 text-xs font-semibold text-(--text-primary) bg-(--bg-card) hover:opacity-80 rounded-xl transition-colors disabled:opacity-30"
-              >
-                {tr.createFolder}
-              </button>
-            </div>
-          </div>
-        </div>
+      {isCreatingFolder && (
+        <CreateFolderModal
+          isOpen={isCreatingFolder}
+          onClose={() => setIsCreatingFolder(false)}
+          onCreate={createFolder}
+        />
       )}
-
-      {/* Модалка создания группы */}
       {isCreatingGroup && (
         <CreateGroupModal
           onClose={() => setIsCreatingGroup(false)}
-          onCreated={(group) => {
+          onCreate={async (name, memberIds) => {
+            const res = await fetch("/api/groups", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name, memberIds }),
+            });
+
+            if (!res.ok) throw new Error("Failed to create group");
+
+            const group: GroupChat = await res.json();
+
             setGroups((prev) => [group, ...prev]);
+
             setIsCreatingGroup(false);
+
             onSelect({
               id: group.id,
               name: group.name,
               image: group.avatar,
               isGroup: true,
             });
+
+            return group;
           }}
         />
       )}

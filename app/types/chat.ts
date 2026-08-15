@@ -6,6 +6,8 @@ export type Message = {
   content: string;
   read: boolean;
   createdAt: string;
+  pinned: boolean;
+  pinnedAt?: string | null;
   sender?: {
     id: string;
     name: string | null;

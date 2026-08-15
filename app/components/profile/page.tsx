@@ -9,9 +9,6 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { UserPost, UserReel } from "../../types/profile";
-import Empty from "./Empty";
-import PostCard from "./PostCard";
-import ReelCard from "./ReelCard";
 
 const Profile = () => {
   const { data: session, status, update } = useSession();
@@ -27,7 +24,6 @@ const Profile = () => {
   const [nameMessage, setNameMessage] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"reels" | "posts">("reels");
   const [emailCopied, setEmailCopied] = useState(false);
   const [avatarLoading, setAvatarLoading] = useState(false);
 
@@ -258,44 +254,6 @@ const Profile = () => {
               {tr.levelDesc}
             </p>
           </div>
-
-          {/* Tabs */}
-          <div className="flex border-b border-(--border)">
-            {(["reels", "posts"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 border-b-2 py-2.5 text-center text-xs font-semibold uppercase tracking-wider transition ${
-                  activeTab === tab
-                    ? "border-(--text-primary) text-(--text-primary)"
-                    : "border-transparent text-(--text-primary)/30 hover:text-(--text-primary)/60"
-                }`}
-              >
-                {tab === "reels" ? tr.myReels : tr.myPosts}
-              </button>
-            ))}
-          </div>
-
-          {/* Content */}
-          {activeTab === "reels" ? (
-            reels.length ? (
-              <div className="grid grid-cols-3 gap-1.5 max-h-96 overflow-auto [scrollbar-width:none]">
-                {reels.map((r) => (
-                  <ReelCard key={r.id} reel={r} />
-                ))}
-              </div>
-            ) : (
-              <Empty label={tr.noReelsYet} />
-            )
-          ) : posts.length ? (
-            <div className="max-h-80 space-y-2 overflow-auto pr-1 [scrollbar-width:thin]">
-              {posts.map((p) => (
-                <PostCard key={p.id} post={p} tr={tr} />
-              ))}
-            </div>
-          ) : (
-            <Empty label={tr.noPostsYet} />
-          )}
 
           <div className="h-px bg-(--border)" />
           <LogOut />

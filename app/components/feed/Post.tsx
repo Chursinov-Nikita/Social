@@ -87,19 +87,15 @@ const PostCard = ({
     if (showComments) loadComments();
   }, [showComments, loadComments]);
 
-  // Лайк — optimistic update
   const handleLike = async () => {
     if (!currentUserId || isLiking) return;
     setIsLiking(true);
-    // Optimistic UI через onLikeChange в Feed
     onLikeChange?.(post.id, !liked);
     try {
       const res = await fetch(`/api/posts/${post.id}/like`, { method: "POST" });
       const data = await res.json();
-      // Если сервер вернул другой результат — синхронизируем
       if (data.liked !== !liked) onLikeChange?.(post.id, data.liked);
     } catch {
-      // Откат при ошибке
       onLikeChange?.(post.id, liked);
     } finally {
       setIsLiking(false);
