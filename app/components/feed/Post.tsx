@@ -13,6 +13,8 @@ import { HeartIcon as HeartSolidIcon } from "@heroicons/react/24/solid";
 import { Loader2 } from "lucide-react";
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatDistanceToNow, format } from "date-fns";
+import { ru, enUS } from "date-fns/locale";
 
 // In-memory кэш комментариев
 const MAX_CACHE = 50;
@@ -181,6 +183,21 @@ const PostCard = ({
   const isOwn = currentUserId === post.authorId;
   const username = post.author.name ?? "Аноним";
 
+  const formatDate = (isoString: string, lang: string) => {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+
+    if (diffMs < 24 * 60 * 60 * 1000) {
+      const locale = lang === "ru" ? ru : enUS;
+      return formatDistanceToNow(date, { addSuffix: true, locale });
+    }
+
+    return format(date, "dd.MM.yyyy HH:mm", {
+      locale: lang === "ru" ? ru : enUS,
+    });
+  };
+
   return (
     <div className="rounded-xl bg-(--bg-secondary) overflow-hidden">
       <div className="px-4 pt-4 pb-2 flex items-center justify-between">
@@ -270,6 +287,10 @@ const PostCard = ({
             <ChatBubbleLeftIcon className="w-5 h-5" />
             <span>{commentsCount}</span>
           </button>
+
+          <span className="ml-auto text-[9px] text-(--text-primary)/30">
+            {formatDate(post.createdAt, lang)}
+          </span>
         </div>
 
         {showComments && (

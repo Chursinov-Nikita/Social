@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
       author: { select: { id: true, name: true, image: true } },
       likes: { select: { userId: true } },
       _count: { select: { comments: true } },
+      createdAt: { select: { createdAt: true } },
     },
   });
 
